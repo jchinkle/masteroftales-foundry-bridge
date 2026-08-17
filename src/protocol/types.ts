@@ -65,9 +65,134 @@ export interface ChatPostedPayload {
   private: boolean;
 }
 
+// ------------------------------------------------------------------- combat
+
+/**
+ * A combatant as the roster reports it. Every field is best-effort: a system
+ * with no dispositions, a combatant with no actor behind it, and a token deleted
+ * between the hook firing and the read all have to produce a line rather than an
+ * exception.
+ */
+export interface Combatant {
+  name: string | null;
+  actorUuid: string | null;
+  tokenUuid: string | null;
+  /** Foundry's `CONST.TOKEN_DISPOSITIONS`: -2 secret, -1 hostile, 0 neutral, 1 friendly. */
+  disposition: number | null;
+}
+
+export interface CombatStartedPayload {
+  combatUuid: string;
+  combatants: Combatant[];
+}
+
+export interface CombatTurnPayload {
+  combatUuid: string;
+  round: number;
+  /** 0-based index into the initiative order, as Foundry counts it. */
+  turn: number;
+  /** Whose turn it now is, or null when the roster could not name one. */
+  current: Combatant | null;
+  /** True when the token whose turn it is, is hidden from the players. */
+  private: boolean;
+}
+
+export interface CombatEndedPayload {
+  combatUuid: string;
+  /** `combat.round` at deletion — how long the fight lasted. */
+  rounds: number | null;
+}
+
+// -------------------------------------------------------------------- actors
+
+/** A token walked onto the scene. */
+export interface ActorAppearedPayload {
+  actorUuid: string | null;
+  tokenUuid: string | null;
+  name: string | null;
+  disposition: number | null;
+  imageUrl: string | null;
+  /** Hidden token: GM-only in MoT. See the README's data-flow section. */
+  private: boolean;
+}
+
+/**
+ * `from` is null the first time this module sees a given pool. Foundry's update
+ * hooks carry the *new* value and the diff, never the old one, so "previous" is
+ * whatever this client last observed. A GM who enables the module mid-fight gets
+ * one line with no `from` and correct deltas after that.
+ */
+export interface HpChange {
+  from: number | null;
+  to: number;
+  max: number | null;
+}
+
+export interface ActorChangedPayload {
+  actorUuid: string | null;
+  tokenUuid: string | null;
+  name: string | null;
+  private: boolean;
+  /** Absent when the update did not touch a hit point pool. */
+  hp?: HpChange;
+  /** Absent unless this update is what set or cleared it. */
+  defeated?: boolean;
+  /**
+   * Effect names, or their status ids when the effect was unnamed. The key is
+   * absent when the update was not about conditions, and each side is absent
+   * when nothing went that way — one `createActiveEffect` sends `added` alone.
+   */
+  conditions?: ConditionChange;
+}
+
+export interface ConditionChange {
+  added?: string[];
+  removed?: string[];
+}
+
+// ---------------------------------------------------------------------- loot
+
+export interface ItemChangePayload {
+  actorUuid: string | null;
+  actorName: string | null;
+  itemUuid: string | null;
+  itemName: string | null;
+  /** `system.quantity` where the system keeps one. */
+  quantity: number | null;
+  /** `system.rarity` where the system keeps one. */
+  rarity: string | null;
+}
+
+/**
+ * Coin. The only payload in the protocol an *adapter* is allowed to bring into
+ * existence, because core Foundry has no concept of currency at all — see
+ * `adapters/index.ts`. Both maps carry only the denominations that moved.
+ */
+export interface CurrencyChangedPayload {
+  actorUuid: string | null;
+  actorName: string | null;
+  from: Record<string, number> | null;
+  to: Record<string, number>;
+}
+
+// -------------------------------------------------------------------- scenes
+
+export interface SceneActivatedPayload {
+  sceneUuid: string;
+  name: string | null;
+}
+
 export type InboundEnvelope =
   | Envelope<RollMadePayload>
-  | Envelope<ChatPostedPayload>;
+  | Envelope<ChatPostedPayload>
+  | Envelope<CombatStartedPayload>
+  | Envelope<CombatTurnPayload>
+  | Envelope<CombatEndedPayload>
+  | Envelope<ActorAppearedPayload>
+  | Envelope<ActorChangedPayload>
+  | Envelope<ItemChangePayload>
+  | Envelope<CurrencyChangedPayload>
+  | Envelope<SceneActivatedPayload>;
 
 // ------------------------------------------------------------------- batching
 
@@ -141,6 +266,25 @@ export interface ApiErrorBody {
 
 /** The drop code meaning "connected, nothing recording" — silent by design. */
 export const NO_LIVE_SESSION = "no_live_session";
+
+/**
+ * The drop code meaning "this project switched that family off".
+ *
+ * The toggles are **server-side**, in MoT's settings panel, and deliberately not
+ * mirrored into module settings. Two switches for one behaviour is a support
+ * conversation that starts with "but I turned it off" — and the server is the
+ * only end that can change its mind about a family without asking a customer to
+ * update a module. So the module captures everything it knows how to capture and
+ * the server drops what the project does not want.
+ *
+ * Which makes this receipt the *expected* answer for a quiet table, exactly like
+ * `no_live_session`, and it is silenced for the same reason: a log line per
+ * dropped event, all night, for a setting working as configured.
+ */
+export const CAPTURE_DISABLED = "capture_disabled";
+
+/** Drop codes that mean "working as intended". Warned about: nothing in here. */
+export const SILENT_DROP_CODES: readonly string[] = [NO_LIVE_SESSION, CAPTURE_DISABLED];
 
 // ----------------------------------------------------------------- outbound
 // (outbound = MoT -> Foundry; the direction this module consumes)

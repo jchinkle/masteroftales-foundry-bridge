@@ -1,8 +1,14 @@
 import { isActiveGM, isNonActiveGM } from "./activation.js";
 import type { AdapterContext } from "./adapters/index.js";
 import { selectAdapter } from "./adapters/index.js";
+import { registerActorCapture } from "./capture/actors.js";
 import type { CaptureContext } from "./capture/chat.js";
 import { registerChatCapture } from "./capture/chat.js";
+import { registerCombatCapture } from "./capture/combat.js";
+import type { DocumentContext } from "./capture/documents.js";
+import { registerItemCapture } from "./capture/items.js";
+import { PriorValues } from "./capture/priorValues.js";
+import { registerSceneCapture } from "./capture/scenes.js";
 import type { SessionSummary } from "./commands/index.js";
 import { createDispatcher, NO_SESSION } from "./commands/index.js";
 import type { BridgeInfo, Envelope, EventBatch } from "./protocol/types.js";
@@ -80,6 +86,21 @@ class Bridge {
   private readonly outbox: Outbox;
   private readonly dispatch: (envelope: Envelope) => void;
 
+  /**
+   * The hit points and coin this client last saw, because Foundry's update
+   * hooks report the new value and the diff but never the old one. Bounded —
+   * see capture/priorValues.ts.
+   */
+  private readonly prior = new PriorValues();
+
+  /**
+   * Backs `DocumentContext.sequence`: the Date-free discriminator for documents
+   * that arrive with no `_stats.modifiedTime`. A wall clock here would mint a
+   * fresh idempotency key on every replay of the outbox, which is the one thing
+   * idempotency keys exist to prevent.
+   */
+  private sequence = 0;
+
   private settings: BridgeSettings;
   private session: SessionSummary = { ...NO_SESSION };
   private tokenRejected = false;
@@ -148,20 +169,52 @@ class Bridge {
   }
 
   start(): void {
-    // The hook id is discarded: nothing unregisters it, because the only way out
-    // of a Foundry world is a page reload, which takes the hook with it.
+    // The hook ids are discarded: nothing unregisters them, because the only way
+    // out of a Foundry world is a page reload, which takes the hooks with it.
+    //
+    // Every family shares one gate and one emit. There are deliberately **no
+    // per-family capture toggles in module settings** — the toggles live in
+    // MoT's own settings panel, the server drops what a project switched off
+    // with a `capture_disabled` receipt, and the outbox treats that receipt as
+    // silently normal. Two switches for one behaviour is a support conversation
+    // that opens with "but I turned it off", and only the server can change its
+    // mind about a family without asking a customer to update a module.
+    const isActive = (): boolean => isActiveGM(game) && this.settings.enabled && !this.tokenRejected;
+    const emit = (envelope: Envelope): void => this.outbox.enqueue(envelope);
+
     registerChatCapture({
       hooks: Hooks,
-      isActive: () => isActiveGM(game) && this.settings.enabled && !this.tokenRejected,
+      isActive,
       context: (): CaptureContext => ({
         resolveUser: (userId) => game.users?.get(userId) ?? null,
         adapter: selectAdapter(game.system?.id),
         adapterContext: adapterContext(),
         now: () => new Date(),
       }),
-      emit: (envelope) => this.outbox.enqueue(envelope),
+      emit,
       log,
     });
+
+    const documents = {
+      hooks: Hooks,
+      isActive,
+      context: (): DocumentContext => ({
+        // Re-selected per event rather than cached: a world can have its system
+        // updated under a running client, and the adapter is cheap to pick.
+        adapter: selectAdapter(game.system?.id),
+        adapterContext: adapterContext(),
+        prior: this.prior,
+        sequence: () => (this.sequence += 1),
+        now: () => new Date(),
+      }),
+      emit,
+      log,
+    };
+
+    registerCombatCapture(documents);
+    registerActorCapture(documents);
+    registerItemCapture(documents);
+    registerSceneCapture(documents);
 
     this.chip.render();
     this.reconfigure();

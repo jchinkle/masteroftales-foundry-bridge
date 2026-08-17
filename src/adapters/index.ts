@@ -18,6 +18,34 @@ export interface AdapterContext {
   systemVersion: string;
 }
 
+/**
+ * What an adapter is shown of an actor update: the post-update `system` data and
+ * the `system` node of the diff that produced it.
+ *
+ * Both, not one. The diff says *what this update was about* — the difference
+ * between somebody taking damage and somebody renaming a token — while the
+ * document says what the values now are. An adapter reading only the diff would
+ * garnish every save-the-sheet with stale numbers; reading only the document, it
+ * could not tell whether anything relevant had moved.
+ */
+export interface SystemDataSource {
+  system: Record<string, unknown> | null;
+  delta: Record<string, unknown> | null;
+}
+
+/**
+ * Coin, as a system that has coin reports it.
+ *
+ * `current` is every denomination the actor now holds; `changed` is the subset
+ * this update touched. The capture layer pairs `changed` with what it last saw
+ * to build the `from`/`to` maps — the adapter remembers nothing and decides
+ * nothing about the log.
+ */
+export interface CurrencyDetection {
+  current: Record<string, number>;
+  changed: string[];
+}
+
 export interface SystemAdapter {
   /** Foundry system id this adapter claims, or "*" for the fallback. */
   readonly id: string;
@@ -25,6 +53,29 @@ export interface SystemAdapter {
   rollExt(message: FoundryChatMessage, roll: FoundryRoll, context: AdapterContext): Record<string, unknown> | undefined;
   /** Garnish for a `chat.posted` envelope, or undefined for none. */
   chatExt(message: FoundryChatMessage, context: AdapterContext): Record<string, unknown> | undefined;
+  /** Garnish for an `actor.changed` envelope — temp HP and the like. */
+  actorExt(source: SystemDataSource, context: AdapterContext): Record<string, unknown> | undefined;
+  /**
+   * **The one place an adapter contributes payload rather than `ext`, and it is
+   * deliberate.**
+   *
+   * Core Foundry has no concept of currency. No document field, no hook, no
+   * shape to read — coin is a thing *systems* invent, in their own places, with
+   * their own denominations. So unlike hit points (which every system spells
+   * differently but every system has), there is no honest generic reading to
+   * fall back to: a `currency.changed` event either comes from system knowledge
+   * or it does not exist at all.
+   *
+   * The boundary still holds where it matters. The adapter answers exactly one
+   * question — "did this update move coin, and what does the purse hold now?" —
+   * while the event type, the payload shape, the idempotency key and the
+   * decision to emit stay in `capture/items.ts`, identical for every system that
+   * answers. The server receives an ordinary `currency.changed` and cannot tell
+   * which adapter spoke. A Pathfinder table gets no coin lines until somebody
+   * writes `adapters/pf2e.ts`, and every other line in its log is unaffected —
+   * which is the design working, not the design leaking.
+   */
+  currency(source: SystemDataSource, context: AdapterContext): CurrencyDetection | undefined;
 }
 
 const ADAPTERS: SystemAdapter[] = [dnd5eAdapter];

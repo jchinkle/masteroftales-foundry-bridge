@@ -268,6 +268,52 @@ describe("Outbox receipts (202)", () => {
     expect(h.log.lines.error).toHaveLength(0);
   });
 
+  it("says NOTHING about a capture_disabled drop — a family switched off in MoT is working as configured", async () => {
+    const h = harness();
+    h.respond(async () => ({
+      status: 202,
+      body: receipt({
+        dropped: [
+          { id: "a", code: "capture_disabled" },
+          { id: "b", code: "capture_disabled" },
+        ],
+      }),
+    }));
+
+    h.outbox.enqueue(event("a"));
+    h.outbox.enqueue(event("b"));
+    await h.clock.advanceAsync(FLUSH_INTERVAL_MS);
+
+    // The toggles are server-side, so this receipt arrives for every event of a
+    // disabled family, all night. A warning per event would be a console full of
+    // a setting doing exactly what the customer asked it to.
+    expect(h.log.lines.warn).toHaveLength(0);
+    expect(h.log.lines.error).toHaveLength(0);
+    // Still counted, so the status tooltip can say what is happening.
+    expect(h.outbox.state.receipts).toEqual({ dropped: 2 });
+    expect(h.outbox.state.queued).toBe(0);
+  });
+
+  it("still warns about the codes that are not routine, in a mixed batch", async () => {
+    const h = harness();
+    h.respond(async () => ({
+      status: 202,
+      body: receipt({
+        dropped: [
+          { id: "a", code: "no_live_session" },
+          { id: "b", code: "capture_disabled" },
+          { id: "c", code: "unknown_type" },
+        ],
+      }),
+    }));
+
+    h.outbox.enqueue(event("a"));
+    await h.clock.advanceAsync(FLUSH_INTERVAL_MS);
+
+    expect(h.log.lines.warn).toHaveLength(1);
+    expect(h.log.lines.warn.join(" ")).toMatch(/unknown_type/);
+  });
+
   it("notes an unknown_type drop with its code, but not as an error", async () => {
     const h = harness();
     h.respond(async () => ({

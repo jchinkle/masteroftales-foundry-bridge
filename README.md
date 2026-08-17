@@ -1,6 +1,7 @@
 # Master of Tales Bridge
 
-A Foundry VTT module that pipes what happens at your table — rolls and chat — into a live
+A Foundry VTT module that pipes what happens at your table — rolls, chat, combat, hit
+points, conditions, loot and scene changes — into a live
 [Master of Tales](https://masteroftales.com) session log, and holds a connection open for
 commands coming back the other way.
 
@@ -57,14 +58,53 @@ first):
   discarded by advantage/keep-highest), the flavor text, and who rolled it.
 - **Chat messages** — the text with HTML stripped, who said it, and whether it was a
   whisper.
+- **Combat** — when a fight starts, who was in it, whose turn it is each round, and how
+  many rounds it lasted.
+- **Actors** — a token appearing on the scene, hit points changing (for player characters
+  *and* for unlinked tokens, which is where every mook keeps its HP), conditions arriving
+  and lifting, and anything marked defeated.
+- **Loot** — items gained and lost by a character, with quantity and rarity where the
+  system publishes them, and coin changing hands.
+- **Scenes** — the party arriving somewhere new, which is what the log's chapter headings
+  are made of.
 - **Bridge identity** on each batch — your world id, Foundry version, game system and
   version, and this module's version. That is what lets the MoT panel say "last seen 3
   minutes ago, dnd5e 5.0.2".
 
+Everything above is read from Foundry's **core document hooks**, which every game system
+goes through. dnd5e worlds get extra detail attached alongside — advantage and
+disadvantage on a d20, temporary hit points, coin denominations — and no server logic ever
+depends on it, so a Pathfinder or homebrew table gets the same log with plainer lines.
+
 **Whispers and private rolls are captured by default.** On the server they are recorded so
 that only editor-and-above members of the project can see them — a player-role member never
 receives them. The reasoning: the log you didn't capture is not recoverable, and the log you
-captured too much of is a filter setting. Per-project toggles live in Master of Tales.
+captured too much of is a filter setting.
+
+### Hidden tokens stay hidden
+
+Everything captured is visible to the whole project **except what came from a hidden
+token**, which is marked private and recorded as GM-only in Master of Tales — the same
+treatment a whisper gets.
+
+That means: a hidden token appearing, a hidden token taking damage or gaining a condition,
+and a hidden combatant's turn are all yours alone. Un-hide the token and everything from
+that moment on is logged normally.
+
+The rule is deliberately just the one signal. Hiding a token is the only thing in Foundry
+that means, unambiguously, *the players cannot see this* — ownership and permission levels
+are about who may edit a character sheet, not about what the table has witnessed, so they
+are not consulted. If you want the ambush kept out of the shared log, hide the token, which
+is what you were going to do anyway.
+
+### Turning families off
+
+**Capture toggles live in Master of Tales, not here.** Per-family switches — combat,
+actors, loot, scenes, chat, rolls — are in your project's settings panel, and the server
+simply does not record what you switched off. There is no second set of switches in the
+module, on purpose: two controls for one behaviour is a support conversation that starts
+with "but I turned it off", and only the server end can change its mind about a family
+without asking you to update a module.
 
 **Master of Tales → Foundry** (a WebSocket the module dials **out** to MoT — nothing ever
 connects *in* to your Foundry, and no port needs opening):
@@ -72,9 +112,13 @@ connects *in* to your Foundry, and no port needs opening):
 - Today: the current session's name and whether it is live, so the chip can say so.
 - Later: dice rolled in Master of Tales appearing as real 3D dice on your players' screens.
 
-Nothing else is read or sent. The module does not read your journals, actors, scenes,
-compendia or files, and it does not send anything anywhere except the server URL you
-configured.
+Nothing else is read or sent. The module reads documents **only as they change**, through
+the hooks listed above — it never walks your world, and it never sends anything anywhere
+except the server URL you configured. Your journals, compendia and files are not read at
+all; actors, tokens and scenes are read only at the moment one of them changes during play,
+and only for the handful of fields named above (name, image, hit points, conditions,
+disposition, coin). Character sheets are not uploaded, and neither is anything you have not
+touched.
 
 ## About the token
 
@@ -120,8 +164,20 @@ nothing else. The ActionCable client protocol is implemented by hand (it is six 
 types) rather than pulled in as a package.
 
 The design keeps everything with a decision in it — batching, backoff, the cable state
-machine, roll serialisation, the loop guard, HTML stripping — in pure functions with unit
-tests, and keeps the Foundry-touching layer thin enough to read in one sitting.
+machine, roll serialisation, the loop guard, HTML stripping, and every capture — in pure
+functions with unit tests, and keeps the Foundry-touching layer thin enough to read in one
+sitting. Each capture family is one file in `src/capture/` whose hook handlers do nothing
+but check the activation gate and hand the document to a pure builder, so a test can feed
+in a v13-shaped document, a v14-shaped one, or a half-deleted one and assert the exact
+envelope that comes out.
+
+Two rules the capture layer holds to, both of which show up all over the tests:
+
+- **Absent over wrong.** Every reader returns null rather than a guess. A missing field is
+  a shorter sentence in somebody's log; a wrong one is a sentence that lies.
+- **Idempotency keys never contain a clock reading.** They are built from Foundry's own
+  document ids and `_stats.modifiedTime`, so an outbox replayed after a reconnect mints the
+  same keys and the server answers `duplicate` instead of writing the night twice.
 
 Releases are cut by pushing a `v*` tag. CI runs the full suite on every push and pull
 request, and the release workflow will not package or publish anything unless the suite

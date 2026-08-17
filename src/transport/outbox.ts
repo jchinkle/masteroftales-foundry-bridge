@@ -1,7 +1,7 @@
 import type { SessionState } from "../protocol/session.js";
 import { carriesSession, parseSessionState } from "../protocol/session.js";
 import type { ApiErrorBody, BatchResponse, BridgeInfo, Envelope, EventBatch } from "../protocol/types.js";
-import { NO_LIVE_SESSION } from "../protocol/types.js";
+import { SILENT_DROP_CODES } from "../protocol/types.js";
 import { PROTOCOL_VERSION } from "../protocol/version.js";
 import { backoffDelay, parseRetryAfter } from "./backoff.js";
 
@@ -259,6 +259,10 @@ export class Outbox {
    *     reconnect looked like a fault.
    *   - `dropped` with `no_live_session` is the single most common outcome this
    *     module will ever see — Foundry open on a Tuesday, nobody playing. Silent.
+   *   - `dropped` with `capture_disabled` is the second: a project that switched
+   *     a capture family off in MoT's settings panel. Also working as intended,
+   *     also silent, and see `SILENT_DROP_CODES` for why that toggle lives on
+   *     the server rather than being mirrored here.
    *   - `dropped` with any other code (today: `unknown_type`) is a note, not a
    *     fault: it means this module is ahead of that server.
    *   - `rejected` is the module's bug list and is the only one that gets an
@@ -274,7 +278,7 @@ export class Outbox {
     const dropped = Array.isArray(response.dropped) ? response.dropped : [];
     this.countReceipts("dropped", dropped);
     for (const receipt of dropped) {
-      if (receipt?.code === NO_LIVE_SESSION) continue;
+      if (receipt?.code && SILENT_DROP_CODES.includes(receipt.code)) continue;
       this.deps.log?.warn?.(
         `[masteroftales-bridge] event dropped: ${receipt?.id ?? "(no id)"} (${receipt?.code ?? "no code"})`,
       );

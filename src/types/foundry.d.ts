@@ -40,6 +40,8 @@ declare global {
     faces?: number;
     number?: number;
     results?: FoundryDieResult[];
+    /** `["kh"]`, `["kl1"]`, `["r<3"]` … Read only as advantage garnish. */
+    modifiers?: string[];
   }
 
   interface FoundryRoll {
@@ -48,6 +50,8 @@ declare global {
     /** Only the DiceTerms, already filtered by Foundry. */
     dice?: FoundryDieTerm[];
     terms?: unknown[];
+    /** dnd5e's D20Roll keeps `advantageMode`/`advantage` here. Garnish only. */
+    options?: Record<string, unknown> | null;
     toJSON?(): unknown;
   }
 
@@ -74,6 +78,120 @@ declare global {
     timestamp?: number | null;
     flags?: Record<string, unknown> | null;
     getFlag?(scope: string, key: string): unknown;
+  }
+
+  // ------------------------------------------------------- world documents
+  //
+  // Slice 3's captures. Everything below is optional, and that is not laziness:
+  // these hooks hand back a v13 document, a v14 document, a synthetic actor, or
+  // (on a few paths, and in every one of our tests) a plain source object. Where
+  // v13 and v14 disagree the declaration carries *both* spellings and the
+  // reading code narrows — see `delta` vs `actorData` and `name` vs `label`.
+
+  /** Foundry's per-document bookkeeping. `modifiedTime` is every idempotency key's stamp. */
+  interface FoundryStats {
+    modifiedTime?: number | null;
+    createdTime?: number | null;
+  }
+
+  /** The fields every world document shares, and the only ones capture reads. */
+  interface FoundryDocument {
+    id?: string | null;
+    /** `Actor.abc`, `Scene.x.Token.y` … the stable cross-document handle. */
+    uuid?: string | null;
+    name?: string | null;
+    /** `"Actor"`, `"Item"`, `"Scene"` … how capture asks "is this parent an Actor?". */
+    documentName?: string | null;
+    _stats?: FoundryStats | null;
+    flags?: Record<string, unknown> | null;
+    getFlag?(scope: string, key: string): unknown;
+  }
+
+  interface FoundryActor extends FoundryDocument {
+    /** System-defined; capture only ever probes it by well-known path. */
+    system?: Record<string, unknown> | null;
+    img?: string | null;
+    /** Set on the *synthetic* actor behind an unlinked token; null on a world actor. */
+    token?: FoundryTokenDocument | null;
+    isToken?: boolean | null;
+  }
+
+  interface FoundryTokenDocument extends FoundryDocument {
+    hidden?: boolean | null;
+    /** `CONST.TOKEN_DISPOSITIONS`. */
+    disposition?: number | null;
+    /** v10+ image location. */
+    texture?: { src?: string | null } | null;
+    /** v9 and earlier; still present on some builds. */
+    img?: string | null;
+    actorId?: string | null;
+    actorLink?: boolean | null;
+    /** The synthetic actor, already carrying the delta applied. */
+    actor?: FoundryActor | null;
+    /** v11+: an unlinked token's overrides of its base actor. */
+    delta?: Record<string, unknown> | null;
+    /** v10 and earlier name for `delta`. Both are read; whichever is there wins. */
+    actorData?: Record<string, unknown> | null;
+  }
+
+  interface FoundryItem extends FoundryDocument {
+    system?: Record<string, unknown> | null;
+    type?: string | null;
+    img?: string | null;
+    /** An Actor for loot; an unowned world item has none. */
+    parent?: FoundryDocument | null;
+  }
+
+  interface FoundryActiveEffect extends FoundryDocument {
+    /** v11+. */
+    name?: string | null;
+    /** v10 and earlier. */
+    label?: string | null;
+    /** v11+: a Set of status ids. v10 kept one in `flags.core.statusId`. */
+    statuses?: Set<string> | string[] | null;
+    parent?: FoundryDocument | null;
+    disabled?: boolean | null;
+  }
+
+  interface FoundryCombatant extends FoundryDocument {
+    actorId?: string | null;
+    tokenId?: string | null;
+    actor?: FoundryActor | null;
+    token?: FoundryTokenDocument | null;
+    defeated?: boolean | null;
+    hidden?: boolean | null;
+    initiative?: number | null;
+  }
+
+  /**
+   * An `EmbeddedCollection` in Foundry, a plain array in our stubs. Read through
+   * `collectionValues()`, which handles both plus the `.contents` spelling.
+   */
+  interface FoundryCombatantCollection extends Iterable<FoundryCombatant> {
+    get?(id: string): FoundryCombatant | undefined;
+    contents?: FoundryCombatant[];
+    size?: number;
+  }
+
+  interface FoundryCombat extends FoundryDocument {
+    round?: number | null;
+    turn?: number | null;
+    started?: boolean | null;
+    /** Whose turn it is. Absent on some paths; `combatants.get(id)` is the fallback. */
+    combatant?: FoundryCombatant | null;
+    combatants?: FoundryCombatantCollection | FoundryCombatant[] | null;
+  }
+
+  /** `combatTurnChange`'s prior/current markers. */
+  interface FoundryTurnMarker {
+    round?: number | null;
+    turn?: number | null;
+    combatantId?: string | null;
+    tokenId?: string | null;
+  }
+
+  interface FoundryScene extends FoundryDocument {
+    active?: boolean | null;
   }
 
   // -------------------------------------------------------------------- game
