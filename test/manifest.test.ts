@@ -51,7 +51,16 @@ describe("package.json", () => {
   });
 
   it("keeps the dev toolchain to typescript, vite and vitest", () => {
-    expect(Object.keys(pkg.devDependencies).sort()).toEqual(["typescript", "vite", "vitest"]);
+    // `@types/node` earns its place the hard way: the tests read files with
+    // `node:fs`, and a clean `npm ci` on CI has no ambient node types — the
+    // very first push proved it. Types only; the no-runtime-deps rule above is
+    // untouched.
+    expect(Object.keys(pkg.devDependencies).sort()).toEqual([
+      "@types/node",
+      "typescript",
+      "vite",
+      "vitest",
+    ]);
   });
 });
 
