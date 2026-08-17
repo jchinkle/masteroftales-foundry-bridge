@@ -1,0 +1,25 @@
+{
+  "id": "masteroftales-bridge",
+  "title": "Master of Tales Bridge",
+  "description": "Pipes what happens at your Foundry table — rolls and chat — into a live Master of Tales session log, and holds a connection open for commands coming back the other way.",
+  "version": "0.1.0",
+  "authors": [
+    {
+      "name": "Jeremy Hinkle"
+    }
+  ],
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14"
+  },
+  "esmodules": [
+    "dist/main.js"
+  ],
+  "socket": false,
+  "url": "https://github.com/jchinkle/masteroftales-foundry-bridge",
+  "manifest": "https://github.com/jchinkle/masteroftales-foundry-bridge/releases/latest/download/module.json",
+  "download": "https://github.com/jchinkle/masteroftales-foundry-bridge/releases/latest/download/module.zip",
+  "readme": "https://github.com/jchinkle/masteroftales-foundry-bridge/blob/main/README.md",
+  "license": "https://github.com/jchinkle/masteroftales-foundry-bridge/blob/main/LICENSE",
+  "bugs": "https://github.com/jchinkle/masteroftales-foundry-bridge/issues"
+}

@@ -1,0 +1,79 @@
+name: Release
+
+# Tag `v0.1.0` -> a GitHub Release carrying `module.json` and `module.zip`, which
+# is exactly what Foundry's manifest-URL install expects to find at
+# releases/latest/download/.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # ---------------------------------------------------------------- gate
+      # Everything below this point is packaging. Nothing is zipped, uploaded or
+      # released unless these pass: a red suite must be impossible to ship.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # ------------------------------------------------------------- package
+      - name: Build
+        run: npm run build
+
+      - name: Derive the version from the tag
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse a tag that disagrees with the committed version
+        # A tag and a module.json that disagree produce a release Foundry will
+        # install and then refuse to update. Cheaper to fail here.
+        run: |
+          committed=$(jq -r .version module.json)
+          if [ "$committed" != "${{ steps.version.outputs.value }}" ]; then
+            echo "::error::module.json says $committed but the tag says ${{ steps.version.outputs.value }}"
+            exit 1
+          fi
+
+      - name: Stamp the release URLs into module.json
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          REPO_URL: https://github.com/${{ github.repository }}
+        run: |
+          jq --arg version "$VERSION" --arg repo "$REPO_URL" '
+            .version = $version
+            | .manifest = ($repo + "/releases/latest/download/module.json")
+            | .download = ($repo + "/releases/download/v" + $version + "/module.zip")
+          ' module.json > module.json.tmp
+          mv module.json.tmp module.json
+          cat module.json
+
+      - name: Zip the module
+        # Contents are rooted at the zip's top level, which is what Foundry
+        # unpacks into Data/modules/masteroftales-bridge/.
+        run: zip -r module.zip module.json dist README.md LICENSE
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Master of Tales Bridge ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            module.zip module.json
