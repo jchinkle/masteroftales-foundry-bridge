@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stripHtml, truncate } from "../src/capture/html.js";
+import { escapeHtml, escapeHtmlWithBreaks, stripHtml, truncate } from "../src/capture/html.js";
 
 describe("stripHtml", () => {
   it("removes inline tags and keeps the text", () => {
@@ -55,6 +55,43 @@ describe("stripHtml", () => {
       '<div class="dnd5e2 chat-card"><header class="card-header"><h3>Longsword</h3></header>' +
       "<div class='card-content'><p>Melee Weapon Attack</p></div></div>";
     expect(stripHtml(card)).toBe("Longsword Melee Weapon Attack");
+  });
+});
+
+describe("escapeHtml", () => {
+  it("escapes everything that could open a tag or end an attribute", () => {
+    expect(escapeHtml(`<b>&"'`)).toBe("&lt;b&gt;&amp;&quot;&#39;");
+  });
+
+  it("escapes the ampersand FIRST, or every other escape gets escaped twice", () => {
+    expect(escapeHtml("<")).toBe("&lt;");
+    expect(escapeHtml("&lt;")).toBe("&amp;lt;");
+  });
+
+  it("defuses the payload people actually try", () => {
+    const escaped = escapeHtml('<img src=x onerror="alert(1)">');
+    expect(escaped).not.toContain("<");
+    expect(escaped).not.toContain(">");
+    expect(escaped).not.toContain('"');
+  });
+
+  it("leaves ordinary prose alone", () => {
+    expect(escapeHtml("The gate grinds open.")).toBe("The gate grinds open.");
+  });
+
+  it("is safe on null and undefined", () => {
+    expect(escapeHtml(null)).toBe("");
+    expect(escapeHtml(undefined)).toBe("");
+  });
+});
+
+describe("escapeHtmlWithBreaks", () => {
+  it("converts every newline spelling", () => {
+    expect(escapeHtmlWithBreaks("a\nb\r\nc\rd")).toBe("a<br>b<br>c<br>d");
+  });
+
+  it("adds the break AFTER escaping, so the input cannot forge one", () => {
+    expect(escapeHtmlWithBreaks("<br>")).toBe("&lt;br&gt;");
   });
 });
 

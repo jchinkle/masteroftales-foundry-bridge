@@ -121,13 +121,62 @@ describe("createDispatcher", () => {
     const log = createLog();
     const dispatch = createDispatcher({ onSession, log });
 
-    dispatch(envelope("dice.show", { faces: [20] }));
     dispatch(envelope("audio.play", {}));
     dispatch(envelope("something.invented.next.year"));
 
     expect(onSession).not.toHaveBeenCalled();
     expect(log.lines.warn).toHaveLength(0);
-    expect(log.lines.debug).toHaveLength(3);
+    expect(log.lines.debug).toHaveLength(2);
+  });
+
+  it("routes dice.show and chat.post to their renderers, handing over the payload only", () => {
+    const onDiceShow = vi.fn();
+    const onChatPost = vi.fn();
+    const dispatch = createDispatcher({ onSession: vi.fn(), onDiceShow, onChatPost });
+
+    dispatch(envelope("dice.show", { dice: [{ sides: 20, values: [12] }] }));
+    dispatch(envelope("chat.post", { text: "The gate grinds open." }));
+
+    expect(onDiceShow).toHaveBeenCalledWith({ dice: [{ sides: 20, values: [12] }] });
+    expect(onChatPost).toHaveBeenCalledWith({ text: "The gate grinds open." });
+  });
+
+  it("does not mistake a render command for session state", () => {
+    const onSession = vi.fn();
+    const dispatch = createDispatcher({ onSession, onDiceShow: vi.fn(), onChatPost: vi.fn() });
+
+    dispatch(envelope("dice.show", { status: "live", id: "s1", name: "Session 14" }));
+
+    expect(onSession).not.toHaveBeenCalled();
+  });
+
+  it("treats a render command as unknown when no renderer is wired", () => {
+    const log = createLog();
+    const dispatch = createDispatcher({ onSession: vi.fn(), log });
+
+    dispatch(envelope("dice.show", { dice: [] }));
+    dispatch(envelope("chat.post", { text: "hi" }));
+
+    expect(log.lines.debug).toHaveLength(2);
+    expect(log.lines.warn).toHaveLength(0);
+  });
+
+  it("keeps the socket alive when a renderer throws", () => {
+    const log = createLog();
+    const onSession = vi.fn();
+    const dispatch = createDispatcher({
+      onSession,
+      log,
+      onDiceShow: () => {
+        throw new Error("Dice So Nice exploded");
+      },
+    });
+
+    expect(() => dispatch(envelope("dice.show", {}))).not.toThrow();
+    // …and the very next frame is still handled.
+    dispatch(envelope("session.state", LIVE));
+    expect(onSession).toHaveBeenCalledTimes(1);
+    expect(log.lines.debug).toHaveLength(1);
   });
 
   it("logs bridge.unsupported — the visible half of ignore-unknown, pointed our way", () => {
@@ -141,5 +190,19 @@ describe("createDispatcher", () => {
     const dispatch = createDispatcher({ onSession: vi.fn() });
     expect(() => dispatch(null as unknown as Envelope)).not.toThrow();
     expect(() => dispatch("nope" as unknown as Envelope)).not.toThrow();
+  });
+
+  it("does not mistake an inherited property name for a command type", () => {
+    // `type` is a string off the wire, so the renderer table has to be able to
+    // say no to "toString" and "constructor" like it does to anything else.
+    const log = createLog();
+    const onDiceShow = vi.fn();
+    const dispatch = createDispatcher({ onSession: vi.fn(), onDiceShow, log });
+
+    dispatch(envelope("toString"));
+    dispatch(envelope("constructor"));
+
+    expect(onDiceShow).not.toHaveBeenCalled();
+    expect(log.lines.debug.join(" ")).toMatch(/unknown command type/);
   });
 });

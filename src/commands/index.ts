@@ -5,16 +5,18 @@ import type { BridgeWelcomePayload, Envelope } from "../protocol/types.js";
 /**
  * The inbound command dispatcher.
  *
- * v0.1.0 understands exactly two types — `bridge.welcome` and `session.state` —
- * and that is the point. Rule 1 of the protocol: **an unknown `type` is ignored,
- * not errored.** A module a version ahead of the server (or behind it) loses a
- * feature; it does not lose the connection, and it does not fill a customer's
- * console with red. Slice 4's `dice.show` and `chat.post` land here as new cases
- * and nothing else in the module changes.
+ * v0.3.0 understands four types — `bridge.welcome` and `session.state`, which
+ * carry session state, and slice 4's `dice.show` and `chat.post`, which are
+ * rendered into Foundry by `commands/dice.ts` and `commands/chat.ts`. Everything
+ * else is ignored, and that is the point. Rule 1 of the protocol: **an unknown
+ * `type` is ignored, not errored.** A module a version ahead of the server (or
+ * behind it) loses a feature; it does not lose the connection, and it does not
+ * fill a customer's console with red.
  *
- * Both types carry the same `{status, id, name}` session object, which is why
- * the parsing lives in `protocol/session.ts` and this file only decides where in
- * the envelope to look for it.
+ * The two session types carry the same `{status, id, name}` object, which is why
+ * that parsing lives in `protocol/session.ts` and this file only decides where in
+ * the envelope to look for it. The two render types are handed to callbacks the
+ * caller supplies, so this file stays free of every Foundry global.
  */
 
 export interface SessionSummary extends SessionState {
@@ -23,14 +25,59 @@ export interface SessionSummary extends SessionState {
 
 export const NO_SESSION: SessionSummary = { ...NO_SESSION_STATE, projectName: null };
 
+/** The logger shape every command path accepts. Nothing here is ever required. */
+export interface CommandLog {
+  debug?(message: string, ...rest: unknown[]): void;
+  warn?(message: string, ...rest: unknown[]): void;
+}
+
+/**
+ * A speaker alias is a character name — "Tharivol", "GM", "The Innkeeper".
+ * Anything longer than this is a payload bug, and truncating it is kinder to the
+ * chat log than rendering it.
+ */
+export const MAX_ALIAS_LENGTH = 120;
+
+/**
+ * `speaker.alias` as both render commands read it: a trimmed, capped string, or
+ * null when MoT sent nothing usable.
+ *
+ * **Not** HTML-escaped, deliberately: the alias is a document field that
+ * Foundry's own chat template renders through an escaping expression, so
+ * escaping it here would put a literal `&amp;` above the message.
+ */
+export function speakerAlias(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  return trimmed.length <= MAX_ALIAS_LENGTH ? trimmed : `${trimmed.slice(0, MAX_ALIAS_LENGTH - 1)}…`;
+}
+
 export interface CommandDeps {
   /** Called whenever a command carried session state. */
   onSession(summary: SessionSummary): void;
-  log?: {
-    debug?(message: string, ...rest: unknown[]): void;
-    warn?(message: string, ...rest: unknown[]): void;
-  };
+  /**
+   * Renders `dice.show`. Optional: a client with no renderer wired treats the
+   * type exactly like an unknown one, which is what keeps this file testable
+   * without a Foundry and honest about rule 1.
+   */
+  onDiceShow?(payload: unknown): void;
+  /** Renders `chat.post`. Optional, for the same reason. */
+  onChatPost?(payload: unknown): void;
+  log?: CommandLog;
 }
+
+/**
+ * The types this module renders into Foundry, and the dep that renders each.
+ *
+ * A Map rather than an object literal, because `envelope.type` is a string off
+ * the wire: an object lookup would answer `"toString"` with something inherited
+ * and truthy, and this table has to be able to say "no" to any string at all.
+ */
+const RENDERED = new Map<string, keyof Pick<CommandDeps, "onDiceShow" | "onChatPost">>([
+  ["dice.show", "onDiceShow"],
+  ["chat.post", "onChatPost"],
+]);
 
 /**
  * Reads session state out of an envelope, or returns null when the type is not
@@ -80,6 +127,26 @@ export function createDispatcher(deps: CommandDeps): (envelope: Envelope) => voi
       // The visible half of rule 1, pointed the other way: the server telling us
       // it did not understand something we sent. Worth a line, never fatal.
       deps.log?.warn?.("[masteroftales-bridge] server did not understand an event we sent", envelope.payload);
+      return;
+    }
+
+    const renderer = RENDERED.get(envelope.type);
+    if (renderer) {
+      const render = deps[renderer];
+      if (!render) {
+        // Wired nowhere — a dispatcher built without a Foundry to render into.
+        // Reads as an unknown type rather than as a problem.
+        deps.log?.debug?.(`[masteroftales-bridge] no renderer wired for "${envelope.type}"`);
+        return;
+      }
+      try {
+        render(envelope.payload);
+      } catch (error) {
+        // Belt and braces over each handler's own guards: a command that cannot
+        // be rendered is a missing animation, never a socket that stops
+        // delivering session state for the rest of the night.
+        deps.log?.debug?.(`[masteroftales-bridge] could not render "${envelope.type}"`, error);
+      }
       return;
     }
 

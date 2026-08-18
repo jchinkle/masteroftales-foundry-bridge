@@ -112,8 +112,21 @@ without asking you to update a module.
 **Master of Tales → Foundry** (a WebSocket the module dials **out** to MoT — nothing ever
 connects *in* to your Foundry, and no port needs opening):
 
-- Today: the current session's name and whether it is live, so the chip can say so.
-- Later: dice rolled in Master of Tales appearing as real 3D dice on your players' screens.
+- **Session state** — the current session's name and whether it is live, so the chip can
+  say so.
+- **Dice** — a roll made in Master of Tales appears in Foundry as a real, already-resolved
+  roll showing the faces MoT rolled. It is a genuine Foundry roll rather than a picture of
+  one, so **Dice So Nice animates it on every player's screen** if you have that module,
+  and the chat card reads like any other roll. The total is the one MoT computed.
+- **Announcements** — a note marked *announce* in Master of Tales appears in Foundry chat
+  under the name MoT gave it. It is posted as **text, never as markup**: a note containing
+  `<b>` reads as `<b>` at the table.
+
+The last two are created by the **active GM's client only**, so the table sees one message
+rather than one per open browser, and both carry a flag that stops this module capturing
+its own output — a roll MoT sent you does not come back as a second entry in your log.
+Anything else MoT may send is ignored quietly: a server that has shipped a feature your
+module has not costs you the feature, never the connection.
 
 Nothing else is read or sent. The module reads documents **only as they change**, through
 the hooks listed above — it never walks your world, and it never sends anything anywhere
@@ -135,7 +148,11 @@ typed it. If two people GM your world, each pastes the key on their own machine.
 **If a player did somehow obtain the key**, here is the whole of what they could do with it:
 
 - Post fake entries into that one project's **live** session log.
-- Receive that project's command stream — session state now, and music cues later.
+- Receive that project's command stream — session state, mirrored dice and announcements
+  now, music cues later.
+- Make a roll or a chat message appear in the Foundry world of anyone connected with a key
+  for the *same* project. It arrives as an ordinary chat message under whatever name was
+  given, it cannot contain markup or a script, and it changes nothing in your world.
 
 And that is the list. An `mtb_` key cannot read your documents, cannot see your assets,
 cannot touch any other project, and does not identify you as a user anywhere. This is
@@ -173,6 +190,13 @@ sitting. Each capture family is one file in `src/capture/` whose hook handlers d
 but check the activation gate and hand the document to a pure builder, so a test can feed
 in a v13-shaped document, a v14-shaped one, or a half-deleted one and assert the exact
 envelope that comes out.
+
+The commands coming the other way are built the same way. `src/commands/` turns a payload
+into a *plan* — a validated, escaped, Foundry-free value — and only then hands the plan to
+the two Foundry classes it needs, which are looked up by feature detection so the same
+bundle works on v13 and v14. A malformed command drops calmly at debug volume rather than
+throwing, because a command that cannot be rendered should cost you an animation, not the
+socket that tells the chip a session went live.
 
 Two rules the capture layer holds to, both of which show up all over the tests:
 

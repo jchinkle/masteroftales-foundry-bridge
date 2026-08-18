@@ -10,6 +10,8 @@
 import type { SystemAdapter } from "../src/adapters/index.js";
 import type { DocumentContext } from "../src/capture/documents.js";
 import { PriorValues } from "../src/capture/priorValues.js";
+import type { ChatMessageClass } from "../src/commands/chat.js";
+import type { DiceApi } from "../src/commands/dice.js";
 import type { SocketLike } from "../src/transport/socket.js";
 
 // -------------------------------------------------------------------- clock
@@ -382,6 +384,164 @@ export function captureContext(
     now: () => new Date("2026-08-17T00:00:00.000Z"),
     ...overrides,
   };
+}
+
+// --------------------------------------------------- outbound command stubs
+//
+// Slice 4 renders *into* Foundry, so these stubs stand in for the classes the
+// module constructs rather than the documents it reads. They model the two rules
+// real Foundry enforces and that a naive fake would let us get away with
+// breaking: `Roll.fromTerms` refuses a mix of evaluated and unevaluated terms,
+// and it derives the formula from the terms it was given.
+
+/** One `RollTerm`. `_evaluated` starts false, exactly as a fresh one does. */
+export class FakeTerm {
+  _evaluated = false;
+
+  constructor(
+    readonly kind: "Die" | "OperatorTerm" | "NumericTerm",
+    readonly data: Record<string, unknown>,
+  ) {}
+}
+
+export interface FakeChatCall {
+  data: Record<string, unknown>;
+  options?: Record<string, unknown> | undefined;
+}
+
+export class FakeRoll {
+  _evaluated = false;
+  _total: number | undefined = undefined;
+  _formula: string;
+
+  /** Every `toMessage` call, so a test can read the flags and the speaker. */
+  readonly messages: FakeChatCall[] = [];
+
+  constructor(
+    readonly terms: FakeTerm[],
+    formula: string,
+  ) {
+    this._formula = formula;
+  }
+
+  toMessage(data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown> {
+    this.messages.push({ data, options });
+    return Promise.resolve({ id: "chat1" });
+  }
+}
+
+/** What Foundry's own `Roll.getFormula` would produce from these terms. */
+function fakeFormula(terms: FakeTerm[]): string {
+  return terms
+    .map((term) => {
+      if (term.kind === "Die") return `${String(term.data.number)}d${String(term.data.faces)}`;
+      if (term.kind === "OperatorTerm") return String(term.data.operator);
+      return String(term.data.number);
+    })
+    .join(" ");
+}
+
+export interface FakeDiceApi {
+  api: DiceApi;
+  /** Every term constructed, in order. */
+  terms: FakeTerm[];
+  /** Every roll `fromTerms` produced. */
+  rolls: FakeRoll[];
+  /** The last roll, for the common single-command test. */
+  readonly lastRoll: FakeRoll | undefined;
+}
+
+export interface FakeDiceApiOptions {
+  /** Make `Roll.fromTerms` throw, the way a system with a stricter Roll would. */
+  fromTermsThrows?: boolean;
+  /** Make `toMessage` reject, the way a Foundry mid-teardown does. */
+  toMessageRejects?: boolean;
+}
+
+export function createDiceApi(options: FakeDiceApiOptions = {}): FakeDiceApi {
+  const terms: FakeTerm[] = [];
+  const rolls: FakeRoll[] = [];
+
+  const record = <T extends FakeTerm>(term: T): T => {
+    terms.push(term);
+    return term;
+  };
+
+  class Die extends FakeTerm {
+    constructor(data: Record<string, unknown>) {
+      super("Die", data);
+      record(this);
+    }
+  }
+  class OperatorTerm extends FakeTerm {
+    constructor(data: Record<string, unknown>) {
+      super("OperatorTerm", data);
+      record(this);
+    }
+  }
+  class NumericTerm extends FakeTerm {
+    constructor(data: Record<string, unknown>) {
+      super("NumericTerm", data);
+      record(this);
+    }
+  }
+
+  const api: DiceApi = {
+    Die,
+    OperatorTerm,
+    NumericTerm,
+    Roll: {
+      fromTerms(given: object[]) {
+        if (options.fromTermsThrows) throw new Error("this system's Roll does not accept those terms");
+
+        const list = given as FakeTerm[];
+        // Foundry's own guard, reproduced verbatim in spirit: a roll is either
+        // wholly evaluated or wholly unevaluated, never half.
+        const evaluated = list.filter((term) => term._evaluated).length;
+        if (evaluated !== 0 && evaluated !== list.length) {
+          throw new Error("You can only call Roll.fromTerms with an array of terms which are either all evaluated, or none evaluated");
+        }
+
+        const roll = new FakeRoll(list, fakeFormula(list));
+        if (options.toMessageRejects) {
+          roll.toMessage = () => Promise.reject(new Error("no chat log"));
+        }
+        rolls.push(roll);
+        return roll;
+      },
+    },
+  };
+
+  return {
+    api,
+    terms,
+    rolls,
+    get lastRoll() {
+      return rolls[rolls.length - 1];
+    },
+  };
+}
+
+export interface FakeChatMessages {
+  ChatMessage: ChatMessageClass;
+  /** Every `ChatMessage.create` call. */
+  created: FakeChatCall[];
+}
+
+export function createChatMessageClass(options: { rejects?: boolean } = {}): FakeChatMessages {
+  const created: FakeChatCall[] = [];
+
+  // A *function*, because `resolveChatMessageClass` looks for a constructor
+  // carrying a static `create` — which is what a Foundry document class is.
+  function ChatMessage(): void {
+    /* never constructed; documents are made through `create` */
+  }
+  ChatMessage.create = (data: Record<string, unknown>, opts?: Record<string, unknown>): Promise<unknown> => {
+    created.push({ data, options: opts });
+    return options.rejects ? Promise.reject(new Error("no chat log")) : Promise.resolve({ id: "chat1" });
+  };
+
+  return { ChatMessage: ChatMessage as unknown as ChatMessageClass, created };
 }
 
 // ------------------------------------------------------- world document stubs

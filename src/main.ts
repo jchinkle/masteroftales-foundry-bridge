@@ -9,6 +9,8 @@ import type { DocumentContext } from "./capture/documents.js";
 import { registerItemCapture } from "./capture/items.js";
 import { PriorValues } from "./capture/priorValues.js";
 import { registerSceneCapture } from "./capture/scenes.js";
+import { createChatPostHandler, resolveChatMessageClass } from "./commands/chat.js";
+import { createDiceShowHandler, resolveDiceApi } from "./commands/dice.js";
 import type { SessionSummary } from "./commands/index.js";
 import { createDispatcher, NO_SESSION } from "./commands/index.js";
 import type { BridgeInfo, Envelope, EventBatch } from "./protocol/types.js";
@@ -116,6 +118,21 @@ class Bridge {
         this.session = summary;
         this.refreshChip();
       },
+      // Slice 4's two render commands. Both are gated on the *same* `isActive`
+      // the captures use — read per command, never cached — because a command
+      // rendered on every connected client would put one chat message on the
+      // table per open browser. The Foundry classes are resolved per command
+      // too: cheap, and tolerant of a client that is still booting.
+      onDiceShow: createDiceShowHandler({
+        isActive: () => this.isActive(),
+        api: () => resolveDiceApi(globalThis),
+        log,
+      }),
+      onChatPost: createChatPostHandler({
+        isActive: () => this.isActive(),
+        chatMessage: () => resolveChatMessageClass(globalThis),
+        log,
+      }),
     });
 
     this.socket = new BridgeSocket({
@@ -179,7 +196,7 @@ class Bridge {
     // silently normal. Two switches for one behaviour is a support conversation
     // that opens with "but I turned it off", and only the server can change its
     // mind about a family without asking a customer to update a module.
-    const isActive = (): boolean => isActiveGM(game) && this.settings.enabled && !this.tokenRejected;
+    const isActive = (): boolean => this.isActive();
     const emit = (envelope: Envelope): void => this.outbox.enqueue(envelope);
 
     registerChatCapture({
@@ -264,6 +281,17 @@ class Bridge {
     }
 
     return { status: response.status, body, retryAfter: response.headers.get("Retry-After") };
+  }
+
+  /**
+   * The one gate, shared by every capture and by both render commands.
+   *
+   * Re-evaluated per event rather than once at `ready`: `activeGM` moves when a
+   * GM drops off the wifi, and this client can be promoted or demoted mid-
+   * session in either direction. See src/activation.ts.
+   */
+  private isActive(): boolean {
+    return isActiveGM(game) && this.settings.enabled && !this.tokenRejected;
   }
 
   private refreshChip(): void {

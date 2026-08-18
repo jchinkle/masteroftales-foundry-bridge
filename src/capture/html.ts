@@ -76,6 +76,36 @@ function collapseWhitespace(input: string): string {
   return input.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * The other direction: plain text in, HTML-safe text out.
+ *
+ * Used by the outbound commands (`chat.post`, and `dice.show`'s flavor), where
+ * MoT hands us a **string** and Foundry renders it as **HTML** in a chat card.
+ * Nothing arriving over the cable is ever inserted as markup — a project's note
+ * is text, and text containing `<b>` should read `<b>` at the table rather than
+ * embolden the rest of the sentence.
+ *
+ * `&` is replaced first, or every replacement after it would be escaped twice.
+ */
+export function escapeHtml(input: string | null | undefined): string {
+  if (input === null || input === undefined) return "";
+  return String(input)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Escapes, then turns newlines into `<br>` — the only markup this module ever
+ * emits, produced **after** escaping so it cannot be forged by the input. A
+ * three-line note from MoT reads as three lines in Foundry chat.
+ */
+export function escapeHtmlWithBreaks(input: string | null | undefined): string {
+  return escapeHtml(input).replace(/\r\n|\r|\n/g, "<br>");
+}
+
 /** Hard cap so one pathological message cannot blow the 16KB per-event budget. */
 export function truncate(input: string, max: number): string {
   if (input.length <= max) return input;
