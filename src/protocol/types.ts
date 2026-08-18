@@ -161,6 +161,11 @@ export interface ItemChangePayload {
   quantity: number | null;
   /** `system.rarity` where the system keeps one. */
   rarity: string | null;
+  /**
+   * True for loot on an actor no player owns — what is in the villain's pockets
+   * is the GM's business. See `lootIsPrivate` in capture/items.ts.
+   */
+  private: boolean;
 }
 
 /**
@@ -173,6 +178,8 @@ export interface CurrencyChangedPayload {
   actorName: string | null;
   from: Record<string, number> | null;
   to: Record<string, number>;
+  /** The same rule as items: an NPC's purse is not the table's business. */
+  private: boolean;
 }
 
 // -------------------------------------------------------------------- scenes

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { dnd5eAdapter } from "../src/adapters/dnd5e.js";
-import { buildCurrencyEvent, buildItemEvent, registerItemCapture } from "../src/capture/items.js";
+import { buildCurrencyEvent, buildItemEvent, lootIsPrivate, registerItemCapture } from "../src/capture/items.js";
 import { bridgeOriginFlags } from "../src/capture/loopGuard.js";
 import type { Envelope } from "../src/protocol/types.js";
 import {
@@ -9,11 +9,48 @@ import {
   documentContext,
   itemDocument,
   nullAdapter,
+  playerActor,
   STUB_MTIME,
   tokenDocument,
 } from "./stubs.js";
 
-const THARIVOL = actorDocument({ uuid: "Actor.thar", name: "Tharivol" });
+/** A player character: somebody at the table owns them, so their loot is public. */
+const THARIVOL = playerActor({ uuid: "Actor.thar", name: "Tharivol" });
+
+/** The villain. Nobody at the table owns him, so his pockets are the GM's. */
+const STRAHD = actorDocument({ uuid: "Actor.strahd", name: "Strahd" });
+
+describe("lootIsPrivate", () => {
+  it("is false only for an actor a player actually owns", () => {
+    expect(lootIsPrivate(playerActor())).toBe(false);
+  });
+
+  it("is true for a GM-controlled actor", () => {
+    expect(lootIsPrivate(actorDocument({ hasPlayerOwner: false }))).toBe(true);
+  });
+
+  it("errs private for every shape of `I do not know`", () => {
+    expect(lootIsPrivate(actorDocument({ hasPlayerOwner: null }))).toBe(true);
+    expect(lootIsPrivate(null)).toBe(true);
+    expect(lootIsPrivate(undefined)).toBe(true);
+    expect(lootIsPrivate({} as FoundryDocument)).toBe(true);
+  });
+
+  it("refuses a truthy non-boolean — only a real `true` opens the log", () => {
+    expect(lootIsPrivate({ hasPlayerOwner: 1 } as unknown as FoundryDocument)).toBe(true);
+    expect(lootIsPrivate({ hasPlayerOwner: "yes" } as unknown as FoundryDocument)).toBe(true);
+  });
+
+  it("composes with the hidden-token rule — either condition alone is enough", () => {
+    // A player-owned character on a hidden token: the party's polymorphed
+    // scout, whose pickups the table has still not seen.
+    const hiddenPC = playerActor({ token: tokenDocument({ hidden: true }) });
+    expect(lootIsPrivate(hiddenPC)).toBe(true);
+
+    const visiblePC = playerActor({ token: tokenDocument({ hidden: false }) });
+    expect(lootIsPrivate(visiblePC)).toBe(false);
+  });
+});
 
 describe("buildItemEvent", () => {
   const potion = itemDocument({
@@ -36,6 +73,7 @@ describe("buildItemEvent", () => {
         itemName: "Potion of Healing",
         quantity: 3,
         rarity: "common",
+        private: false,
       },
     });
   });
@@ -91,6 +129,38 @@ describe("buildItemEvent", () => {
     expect(buildItemEvent(null, "granted", documentContext())).toBeNull();
   });
 
+  it("keeps an NPC's loot private — the players do not get to read the villain's pockets", () => {
+    // Found at a real table: an item granted to a GM-controlled NPC landed in
+    // the shared log and told everyone what Strahd was carrying.
+    const dagger = itemDocument({ uuid: "Actor.strahd.Item.i9", name: "Sunsword", parent: STRAHD });
+    expect(buildItemEvent(dagger, "granted", documentContext())?.payload.private).toBe(true);
+  });
+
+  it("keeps an NPC's losses private too — a removal leaks the same inventory", () => {
+    const dagger = itemDocument({ uuid: "Actor.strahd.Item.i9", parent: STRAHD });
+    expect(buildItemEvent(dagger, "removed", documentContext())?.payload.private).toBe(true);
+  });
+
+  it("leaves a player character's loot public — that is the table's shared story", () => {
+    const potion = itemDocument({ uuid: "Actor.thar.Item.i1", parent: THARIVOL });
+    expect(buildItemEvent(potion, "granted", documentContext())?.payload.private).toBe(false);
+  });
+
+  it("treats a missing hasPlayerOwner as private — the only safe direction to be wrong in", () => {
+    // It is a *getter* on the Actor class, so a plain source object or a
+    // half-torn-down document simply does not have it. Guessing public here
+    // publishes an inventory nobody can un-publish.
+    const noGetter: FoundryDocument = {
+      id: "a1",
+      uuid: "Actor.mystery",
+      name: "Something",
+      documentName: "Actor",
+    };
+    const item = itemDocument({ uuid: "Actor.mystery.Item.i1", parent: noGetter });
+
+    expect(buildItemEvent(item, "granted", documentContext())?.payload.private).toBe(true);
+  });
+
   it("does not try to infer a transfer — a hand-off is a delete and a create", () => {
     // The two documents share no id and nothing links them, so reporting both
     // honestly beats inventing a relationship the module cannot observe.
@@ -109,7 +179,7 @@ describe("buildCurrencyEvent", () => {
   }
 
   function purse(currency: Record<string, number>) {
-    return actorDocument({ uuid: "Actor.thar", name: "Tharivol", system: { currency } });
+    return playerActor({ uuid: "Actor.thar", name: "Tharivol", system: { currency } });
   }
 
   it("emits nothing at all on a system with no adapter — core has no currency concept", () => {
@@ -139,8 +209,17 @@ describe("buildCurrencyEvent", () => {
         actorName: "Tharivol",
         from: { gp: 10 },
         to: { gp: 25 },
+        private: false,
       },
     });
+  });
+
+  it("keeps an NPC's purse private — the same rule, for the same reason", () => {
+    const context = dnd5eContext();
+    const strahd = actorDocument({ uuid: "Actor.strahd", name: "Strahd", system: { currency: { gp: 900 } } });
+
+    const envelope = buildCurrencyEvent(strahd, { system: { currency: { gp: 900 } } }, context);
+    expect(envelope?.payload.private).toBe(true);
   });
 
   it("reports `from: null` on the first purse change it ever sees", () => {

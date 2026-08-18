@@ -2,7 +2,7 @@
   "id": "masteroftales-bridge",
   "title": "Master of Tales Bridge",
   "description": "Pipes what happens at your Foundry table — rolls, chat, combat, hit points, conditions, loot and scene changes — into a live Master of Tales session log, and holds a connection open for commands coming back the other way.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "authors": [
     {
       "name": "Jeremy Hinkle"

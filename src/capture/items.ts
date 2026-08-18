@@ -9,6 +9,7 @@ import {
   documentTimestamp,
   finiteNumber,
   isActorDocument,
+  isHidden,
   nonEmptyString,
   plainRecord,
 } from "./documents.js";
@@ -37,7 +38,43 @@ import { currencySlot } from "./priorValues.js";
  * adapter whether an actor update moved coin and builds the same generic
  * envelope for whatever answers. A table on a system with no adapter gets no
  * coin lines and a completely unaffected log otherwise.
+ *
+ * ## Loot is the one family with a privacy rule of its own
+ *
+ * Everywhere else in this module `private` means "this came from a hidden
+ * token". Loot adds a second condition — see {@link lootIsPrivate} — and the
+ * reason came from a real table: an item handed to a GM-controlled NPC appeared
+ * in the shared log and told the players what was in the villain's pockets.
  */
+
+/**
+ * **Loot on an actor no player owns is GM-only.**
+ *
+ * `hasPlayerOwner` is Foundry's own answer to "is this one of the party's, or
+ * the GM's?", and it is the right question to ask: ownership is exactly what
+ * separates a character sheet the players may open from a statblock they may
+ * not.
+ *
+ * Note this is the *opposite* reading from the one deliberately kept for hit
+ * points and conditions. Those stay public because they are things the table
+ * watched happen — a monster being bloodied is public precisely because
+ * everyone saw it land. An inventory is not watched; it is read off a sheet.
+ *
+ * **Absent reads as private**, which is the whole reason this is a function
+ * rather than a field access. `hasPlayerOwner` is a getter on the Actor class,
+ * so a plain source object, a half-torn-down document, or a future Foundry that
+ * renames it all yield `undefined` — and there is only one safe direction to be
+ * wrong in. Guessing private costs a player's potion being filed GM-only, which
+ * a GM can fix; guessing public publishes the villain's inventory to the table,
+ * which nobody can take back.
+ *
+ * Composes with the hidden-token rule rather than replacing it: either condition
+ * alone makes the entry private.
+ */
+export function lootIsPrivate(actor: FoundryDocument | null | undefined): boolean {
+  const owner = actor as FoundryActor | null | undefined;
+  return owner?.hasPlayerOwner !== true || isHidden(owner?.token);
+}
 
 // ------------------------------------------------------------ pure builders
 
@@ -78,6 +115,7 @@ export function buildItemEvent(
       itemName: docName(item),
       quantity: finiteNumber(system?.quantity),
       rarity: nonEmptyString(system?.rarity),
+      private: lootIsPrivate(parent),
     },
   };
 }
@@ -134,6 +172,7 @@ export function buildCurrencyEvent(
       // different sentences, kept apart.
       from,
       to,
+      private: lootIsPrivate(actor),
     },
   };
 }

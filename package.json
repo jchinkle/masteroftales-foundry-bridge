@@ -1,6 +1,6 @@
 {
   "name": "masteroftales-bridge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Foundry VTT module bridging the virtual table to a Master of Tales session log.",
   "license": "MIT",

@@ -425,6 +425,13 @@ export interface StubActorOptions extends StubDocumentOptions {
   img?: string | null;
   /** Set for the *synthetic* actor behind an unlinked token. */
   token?: FoundryTokenDocument | null;
+  /**
+   * Whether a non-GM user owns this actor. **Defaults to false** — a stub actor
+   * is an NPC unless a test says so, which is the same direction the production
+   * reading errs in. A test that forgets to think about ownership therefore gets
+   * the private answer rather than the leaky one.
+   */
+  hasPlayerOwner?: boolean | null;
 }
 
 export function actorDocument(options: StubActorOptions = {}): FoundryActor {
@@ -433,7 +440,13 @@ export function actorDocument(options: StubActorOptions = {}): FoundryActor {
     system: options.system === undefined ? null : options.system,
     img: options.img === undefined ? null : options.img,
     token: options.token === undefined ? null : options.token,
+    hasPlayerOwner: options.hasPlayerOwner === undefined ? false : options.hasPlayerOwner,
   };
+}
+
+/** A player character — owned by somebody at the table, so their loot is public. */
+export function playerActor(options: StubActorOptions = {}): FoundryActor {
+  return actorDocument({ hasPlayerOwner: true, ...options });
 }
 
 export interface StubTokenOptions extends StubDocumentOptions {

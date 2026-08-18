@@ -81,21 +81,24 @@ that only editor-and-above members of the project can see them — a player-role
 receives them. The reasoning: the log you didn't capture is not recoverable, and the log you
 captured too much of is a filter setting.
 
-### Hidden tokens stay hidden
+### What stays GM-only
 
-Everything captured is visible to the whole project **except what came from a hidden
-token**, which is marked private and recorded as GM-only in Master of Tales — the same
-treatment a whisper gets.
+Everything captured is visible to the whole project except two things, both marked private
+and recorded as GM-only in Master of Tales — the same treatment a whisper gets.
 
-That means: a hidden token appearing, a hidden token taking damage or gaining a condition,
-and a hidden combatant's turn are all yours alone. Un-hide the token and everything from
-that moment on is logged normally.
+**Anything from a hidden token.** A hidden token appearing, taking damage or gaining a
+condition, and a hidden combatant's turn are all yours alone. Un-hide the token and
+everything from that moment on is logged normally. Hiding a token is the one thing in
+Foundry that means, unambiguously, *the players cannot see this*, so if you want the ambush
+kept out of the shared log, hide the token — which is what you were going to do anyway.
 
-The rule is deliberately just the one signal. Hiding a token is the only thing in Foundry
-that means, unambiguously, *the players cannot see this* — ownership and permission levels
-are about who may edit a character sheet, not about what the table has witnessed, so they
-are not consulted. If you want the ambush kept out of the shared log, hide the token, which
-is what you were going to do anyway.
+**Loot belonging to an actor no player owns.** Items and coin gained or lost by a
+GM-controlled NPC stay yours, even while the fight itself is logged in full. The reasoning
+is the difference between the two kinds of event: hit points and conditions are things the
+table *watched happen* — a monster being bloodied is public precisely because everyone saw
+it land — whereas an inventory is read off a sheet nobody else may open. Your players'
+own characters' loot is public as normal, and an actor whose ownership the module cannot
+read is treated as the GM's.
 
 ### Turning families off
 

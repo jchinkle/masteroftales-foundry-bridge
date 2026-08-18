@@ -110,6 +110,15 @@ declare global {
   interface FoundryActor extends FoundryDocument {
     /** System-defined; capture only ever probes it by well-known path. */
     system?: Record<string, unknown> | null;
+    /**
+     * True when some non-GM user owns this actor — Foundry's own answer to "is
+     * this one of the party's, or the GM's?".
+     *
+     * Optional here, and that is load-bearing: it is a *getter* on the Actor
+     * class, so a plain source object does not have it. Absent must therefore
+     * read as "not player-owned" — see `lootIsPrivate` in capture/items.ts.
+     */
+    hasPlayerOwner?: boolean | null;
     img?: string | null;
     /** Set on the *synthetic* actor behind an unlinked token; null on a world actor. */
     token?: FoundryTokenDocument | null;
