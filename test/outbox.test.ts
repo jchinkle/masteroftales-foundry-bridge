@@ -10,6 +10,9 @@ const BRIDGE: BridgeInfo = {
   foundry: "13.346",
   system: { id: "dnd5e", version: "5.0.2" },
   module: "0.1.0",
+  // The roster rides on the identity block, so it goes out on every batch as
+  // well as on every heartbeat — see protocol/roster.ts.
+  users: [{ id: "gm1", name: "Jeremy", active: true, gm: true }],
 };
 
 function event(id: string): Envelope {

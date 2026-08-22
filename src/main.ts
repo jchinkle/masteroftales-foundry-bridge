@@ -11,8 +11,17 @@ import { PriorValues } from "./capture/priorValues.js";
 import { registerSceneCapture } from "./capture/scenes.js";
 import { createChatPostHandler, resolveChatMessageClass } from "./commands/chat.js";
 import { createDiceShowHandler, resolveDiceApi } from "./commands/dice.js";
+import type { ImagePlan, ImageShowSocketEvent } from "./commands/images.js";
+import {
+  createImageShowHandler,
+  createImageSocketListener,
+  renderImagePopout,
+  resolveImagePopout,
+  SOCKET_CHANNEL,
+} from "./commands/images.js";
 import type { SessionSummary } from "./commands/index.js";
 import { createDispatcher, NO_SESSION } from "./commands/index.js";
+import { readRoster } from "./protocol/roster.js";
 import type { BridgeInfo, Envelope, EventBatch } from "./protocol/types.js";
 import { MODULE_ID, MODULE_VERSION } from "./protocol/version.js";
 import type { BridgeSettings } from "./settings.js";
@@ -25,6 +34,7 @@ import {
 } from "./settings.js";
 import type { PostResult } from "./transport/outbox.js";
 import { Outbox } from "./transport/outbox.js";
+import { Heartbeat } from "./transport/heartbeat.js";
 import type { SocketLike } from "./transport/socket.js";
 import { BridgeSocket } from "./transport/socket.js";
 import { apiUrl, cableUrl, checkServerUrl } from "./transport/urls.js";
@@ -59,6 +69,12 @@ function moduleVersion(): string {
   return game.modules?.get(MODULE_ID)?.version ?? MODULE_VERSION;
 }
 
+/**
+ * The identity block on every batch **and** every heartbeat — which makes it the
+ * roster's delivery vehicle. Re-read per send rather than built once, because
+ * `users` is the half of it that changes during a session: somebody logs in, a
+ * player's laptop sleeps, a new user is created mid-game.
+ */
 function bridgeInfo(): BridgeInfo {
   return {
     world: game.world?.id ?? "unknown",
@@ -68,6 +84,7 @@ function bridgeInfo(): BridgeInfo {
       version: game.system?.version ?? "unknown",
     },
     module: moduleVersion(),
+    users: readRoster(game.users),
   };
 }
 
@@ -86,6 +103,7 @@ class Bridge {
   private readonly chip: StatusChip;
   private readonly socket: BridgeSocket;
   private readonly outbox: Outbox;
+  private readonly heartbeat: Heartbeat;
   private readonly dispatch: (envelope: Envelope) => void;
 
   /**
@@ -133,6 +151,18 @@ class Bridge {
         chatMessage: () => resolveChatMessageClass(globalThis),
         log,
       }),
+      // The odd one out, and the comment above is only half true of it. It is
+      // gated on the same `isActive` — one client must own the re-broadcast, or
+      // a two-GM table opens every picture twice — but the *rendering* it causes
+      // happens on every targeted client, through the listener registered at
+      // `init` below. See commands/images.ts.
+      onImageShow: createImageShowHandler({
+        isActive: () => this.isActive(),
+        emit: (event) => emitToClients(event),
+        selfId: () => game.user?.id ?? null,
+        renderLocal: (plan) => renderLocally(plan),
+        log,
+      }),
     });
 
     this.socket = new BridgeSocket({
@@ -148,6 +178,12 @@ class Bridge {
       onEnvelope: (envelope) => this.dispatch(envelope),
       onStatus: (status) => {
         if (status === "rejected") this.tokenRejected = true;
+        // The roster matters exactly when MoT can send commands, so the
+        // heartbeat lives and dies with the command socket rather than running
+        // on its own clock. `start()` beats once immediately, which is what
+        // makes the pick-list correct the moment the panel can use it.
+        if (status === "connected") this.heartbeat.start();
+        else this.heartbeat.stop();
         // Off the socket we do not *know* the session state — so we forget it
         // rather than keeping a stale claim (a `live: false` sitting next to a
         // `status: "live"` would be a lie about a thing we simply cannot see).
@@ -181,6 +217,14 @@ class Bridge {
         this.refreshChip();
       },
       onStateChange: () => this.refreshChip(),
+      log,
+    });
+
+    this.heartbeat = new Heartbeat({
+      bridgeInfo,
+      post: (batch) => this.postBatch(batch),
+      setTimer: (fn, ms) => globalThis.setTimeout(fn, ms),
+      clearTimer: (handle) => globalThis.clearTimeout(handle as number),
       log,
     });
   }
@@ -232,6 +276,12 @@ class Bridge {
     registerActorCapture(documents);
     registerItemCapture(documents);
     registerSceneCapture(documents);
+
+    // Somebody joining or leaving is the one roster change worth not waiting a
+    // heartbeat for: a player alt-tabs into the game *because* the GM said they
+    // were about to show them something. `beat()` is a no-op while one is
+    // already in flight, so a whole party logging in at once is one extra POST.
+    Hooks.on("userConnected", () => this.heartbeat.beat());
 
     this.chip.render();
     this.reconfigure();
@@ -308,17 +358,84 @@ class Bridge {
 
 let bridge: Bridge | null = null;
 
+// ---------------------------------------------------------- the image path
+//
+// Three small functions, kept together because they are the only place in this
+// file where "the active GM does the work" stops being true. The bridge socket
+// still arrives on one client — but an ImagePopout is a *window*, and a window
+// is client-local, so the work has to be finished on every screen that was
+// targeted. See commands/images.ts for the whole argument.
+
+/** Puts the event on Foundry's module socket. Reaches every other client, never this one. */
+function emitToClients(event: ImageShowSocketEvent): void {
+  const socket = game.socket;
+  if (!socket) {
+    log.debug("no Foundry socket available; image.show reached this client only");
+    return;
+  }
+  socket.emit(SOCKET_CHANNEL, event);
+}
+
+/** Opens the popout on *this* machine. Foundry does not echo `emit` to the sender. */
+function renderLocally(plan: ImagePlan): void {
+  const api = resolveImagePopout(globalThis);
+  if (!api) {
+    log.debug("no Foundry ImagePopout class available; dropping the local image.show");
+    return;
+  }
+  if (!renderImagePopout(plan, api)) log.debug("could not open an image popout", plan);
+}
+
+/**
+ * The listener every client registers — player, second GM, active GM alike.
+ *
+ * **Not gated on `isActiveGM`.** This is the one registration in the module that
+ * must run on the idle path, and the idle path is the one that returns early
+ * three lines into the `ready` hook below. Putting it inside `Bridge` would make
+ * the feature work exactly as well as showing the picture on the GM's monitor.
+ *
+ * Called from both `init` and `ready` and guarded, because `game.socket` is
+ * established before `init` on current majors but that is an implementation
+ * detail of Foundry's boot order rather than a promise, and the cost of being
+ * wrong about it is a feature that silently does nothing for players.
+ */
+let imageListenerRegistered = false;
+
+function registerImageListener(): void {
+  if (imageListenerRegistered) return;
+
+  const socket = game.socket;
+  if (!socket || typeof socket.on !== "function") return;
+
+  socket.on(
+    SOCKET_CHANNEL,
+    createImageSocketListener({
+      selfId: () => game.user?.id ?? null,
+      api: () => resolveImagePopout(globalThis),
+      log,
+    }),
+  );
+
+  imageListenerRegistered = true;
+}
+
 Hooks.once("init", () => {
   registerSettings({
     onChange: () => bridge?.reconfigure(),
     notify,
   });
+  registerImageListener();
 });
 
 Hooks.once("ready", () => {
+  // Before the activation gate, deliberately — every client needs this, and the
+  // gate below returns.
+  registerImageListener();
+
   if (!isActiveGM(game)) {
     // The idle path, and by far the most common one: every player's client, plus
-    // any second GM. Says so once, at debug volume, and then does nothing at all.
+    // any second GM. Says so once, at debug volume, and then does nothing at all
+    // beyond listening for images.
     const why = isNonActiveGM(game)
       ? "another GM is the active GM on this world"
       : "this client is not the active GM";

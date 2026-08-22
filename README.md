@@ -70,6 +70,13 @@ first):
 - **Bridge identity** on each batch — your world id, Foundry version, game system and
   version, and this module's version. That is what lets the MoT panel say "last seen 3
   minutes ago, dnd5e 5.0.2".
+- **Who is at the table**, alongside that identity — each Foundry user's id, display name,
+  whether they are a GM, and whether their browser is connected right now. Nothing else
+  about them: no email, no password, no character sheet, no permissions, no IP. It exists
+  so that "show this image to Robin" has a Robin to point at. It is also sent on its own,
+  with no events attached, every 30 seconds while connected — otherwise the list in the MoT
+  panel would be as stale as the last roll of the night, and a quiet table is exactly when
+  you go looking for it.
 
 Everything above is read from Foundry's **core document hooks**, which every game system
 goes through. dnd5e worlds get extra detail attached alongside — advantage and
@@ -121,10 +128,24 @@ connects *in* to your Foundry, and no port needs opening):
 - **Announcements** — a note marked *announce* in Master of Tales appears in Foundry chat
   under the name MoT gave it. It is posted as **text, never as markup**: a note containing
   `<b>` reads as `<b>` at the table.
+- **Images** — a map, a portrait or a handout shown from Master of Tales opens as an image
+  window on the screens you picked: everybody, or one player, or three. It is an ordinary
+  Foundry image popout, and the picture is loaded straight from the URL MoT sent, which may
+  be a MoT upload or a path to a file already in your own Foundry. Only `http(s)` and
+  in-Foundry paths are accepted; anything else is refused unopened.
 
-The last two are created by the **active GM's client only**, so the table sees one message
-rather than one per open browser, and both carry a flag that stops this module capturing
-its own output — a roll MoT sent you does not come back as a second entry in your log.
+Dice and announcements are created by the **active GM's client only**, so the table sees
+one message rather than one per open browser, and both carry a flag that stops this module
+capturing its own output — a roll MoT sent you does not come back as a second entry in
+your log.
+
+Images are the exception, and the reason this module asks Foundry for socket access: a
+chat message is a *document*, which Foundry copies to every client by itself, but an image
+window is not. So the GM's client passes the command on to the targeted players' clients
+over Foundry's own connection — the same one Foundry uses for everything else, never a new
+one, and never anything leaving your network. Each client then decides for itself whether
+it was one of the people asked for.
+
 Anything else MoT may send is ignored quietly: a server that has shipped a feature your
 module has not costs you the feature, never the connection.
 
@@ -153,6 +174,10 @@ typed it. If two people GM your world, each pastes the key on their own machine.
 - Make a roll or a chat message appear in the Foundry world of anyone connected with a key
   for the *same* project. It arrives as an ordinary chat message under whatever name was
   given, it cannot contain markup or a script, and it changes nothing in your world.
+- Open an image window on those same people's screens, and read the list of who is logged
+  in to that world (display names only). The image is loaded as a picture and nothing else
+  — the URL must be `http(s)` or a path inside that Foundry, and a `javascript:` or `data:`
+  one is refused before it reaches the browser.
 
 And that is the list. An `mtb_` key cannot read your documents, cannot see your assets,
 cannot touch any other project, and does not identify you as a user anywhere. This is

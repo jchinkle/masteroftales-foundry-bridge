@@ -29,8 +29,12 @@ describe("module.json", () => {
     expect(manifest.esmodules).toEqual(["dist/main.js"]);
   });
 
-  it("does not claim Foundry's socket — this module owns both ends of its own protocol", () => {
-    expect(manifest.socket).toBe(false);
+  it("claims Foundry's socket, which `image.show` cannot work without", () => {
+    // Foundry only routes `module.<id>` traffic for modules that declare this.
+    // Without it, `game.socket.emit` is a silent no-op on the GM's client and no
+    // player ever sees the image — exactly the kind of failure that surfaces
+    // only after a release, at somebody else's table.
+    expect(manifest.socket).toBe(true);
   });
 
   it("points manifest and download at the GitHub Releases pattern Foundry installs from", () => {

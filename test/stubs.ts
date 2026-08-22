@@ -158,6 +158,12 @@ export interface StubUser {
   name?: string | null;
   isGM?: boolean;
   isSelf?: boolean;
+  /**
+   * Connected right now. **Left exactly as given** — no default is applied, so a
+   * roster test that says nothing about `active` asserts the production
+   * reading's "absent means offline" rule rather than a stub's opinion.
+   */
+  active?: boolean;
 }
 
 export interface StubGameOptions {
@@ -542,6 +548,103 @@ export function createChatMessageClass(options: { rejects?: boolean } = {}): Fak
   };
 
   return { ChatMessage: ChatMessage as unknown as ChatMessageClass, created };
+}
+
+// ------------------------------------------------- foundry's own module socket
+
+/**
+ * Foundry's socket.io connection, as `image.show` uses it — and note the one
+ * behaviour a naive fake would get wrong and that the whole feature turns on:
+ * **`emit` does not deliver to the emitter.** The GM's own copy of the image
+ * comes from a separate local render, and a stub that echoed would hide the bug
+ * where that render is missing.
+ */
+export interface FakeModuleSocket {
+  socket: { emit(event: string, data: unknown): void; on(event: string, handler: (data: unknown) => void): void };
+  /** Everything emitted, in order. */
+  emitted: Array<{ event: string; data: unknown }>;
+  /** Handlers registered per channel. */
+  handlers: Map<string, Array<(data: unknown) => void>>;
+  /** Test-only: deliver a payload to this client's listeners, as the server would. */
+  deliver(event: string, data: unknown): void;
+}
+
+export function createModuleSocket(options: { emitThrows?: boolean } = {}): FakeModuleSocket {
+  const emitted: Array<{ event: string; data: unknown }> = [];
+  const handlers = new Map<string, Array<(data: unknown) => void>>();
+
+  return {
+    emitted,
+    handlers,
+    socket: {
+      emit(event, data) {
+        if (options.emitThrows) throw new Error("socket is not connected");
+        // Serialised and revived, because Foundry's really is — a payload that
+        // only survives by reference would pass a test and fail at a table.
+        emitted.push({ event, data: JSON.parse(JSON.stringify(data)) as unknown });
+      },
+      on(event, handler) {
+        const list = handlers.get(event) ?? [];
+        list.push(handler);
+        handlers.set(event, list);
+      },
+    },
+    deliver(event, data) {
+      for (const handler of handlers.get(event) ?? []) handler(data);
+    },
+  };
+}
+
+// ------------------------------------------------------------- ImagePopout
+
+export interface FakePopout {
+  args: unknown[];
+  rendered: boolean[];
+}
+
+export interface FakeImagePopout {
+  /** A v13+ scope: the class lives at `foundry.applications.apps.ImagePopout`. */
+  v13Scope: Record<string, unknown>;
+  /** A v12-era scope: the bare global only. */
+  legacyScope: Record<string, unknown>;
+  /** Every popout constructed, in order, with the exact argument list it got. */
+  popouts: FakePopout[];
+  readonly last: FakePopout | undefined;
+}
+
+export interface FakeImagePopoutOptions {
+  /** Make the constructor throw, the way a Foundry mid-teardown does. */
+  constructorThrows?: boolean;
+  /** Make `render` reject, for the unhandled-rejection guard. */
+  renderRejects?: boolean;
+}
+
+export function createImagePopout(options: FakeImagePopoutOptions = {}): FakeImagePopout {
+  const popouts: FakePopout[] = [];
+
+  class ImagePopout {
+    readonly self: FakePopout;
+
+    constructor(...args: unknown[]) {
+      if (options.constructorThrows) throw new Error("no application layer");
+      this.self = { args, rendered: [] };
+      popouts.push(this.self);
+    }
+
+    render(force?: boolean): Promise<unknown> {
+      this.self.rendered.push(force === true);
+      return options.renderRejects ? Promise.reject(new Error("no canvas")) : Promise.resolve(this);
+    }
+  }
+
+  return {
+    popouts,
+    v13Scope: { foundry: { applications: { apps: { ImagePopout } } }, ImagePopout },
+    legacyScope: { ImagePopout },
+    get last() {
+      return popouts[popouts.length - 1];
+    },
+  };
 }
 
 // ------------------------------------------------------- world document stubs

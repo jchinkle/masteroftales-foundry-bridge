@@ -10,6 +10,10 @@
  *      guarantees are stable. See `protocol/keys.ts`.
  */
 
+import type { BridgeUser } from "./roster.js";
+
+export type { BridgeUser };
+
 /** One envelope, both directions. */
 export interface Envelope<P = unknown> {
   v: number;
@@ -208,6 +212,12 @@ export interface BridgeInfo {
   foundry: string;
   system: { id: string; version: string };
   module: string;
+  /**
+   * The table's roster — see protocol/roster.ts. Present on every batch and on
+   * every heartbeat, which is what makes MoT's "show this image to…" pick-list
+   * possible at all, and never more than one heartbeat stale.
+   */
+  users: BridgeUser[];
 }
 
 export interface EventBatch {

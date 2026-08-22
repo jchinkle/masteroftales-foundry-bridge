@@ -26,6 +26,13 @@ declare global {
     isGM?: boolean;
     /** True on exactly one client: the one this browser is logged in as. */
     isSelf?: boolean;
+    /**
+     * Connected right now — Foundry's `User#active`. The difference between
+     * "Robin has a character in this world" and "Robin's browser is open", and
+     * only the second can be shown an image. Optional, because a plain source
+     * object has no such field and absent must read as "not online".
+     */
+    active?: boolean;
   }
 
   interface FoundryDieResult {
@@ -223,6 +230,19 @@ declare global {
     active?: boolean;
   }
 
+  /**
+   * Foundry's **own** socket — its socket.io connection back to the Foundry
+   * server, and a completely different thing from `transport/socket.ts`, which
+   * is this module's WebSocket out to Master of Tales. This one is how the GM's
+   * client reaches the players' clients; it is available only after `ready`, and
+   * only when `module.json` declares `"socket": true`.
+   */
+  interface FoundrySocket {
+    emit(event: string, data: unknown, ack?: (...args: unknown[]) => void): void;
+    on(event: string, handler: (...args: any[]) => unknown): void;
+    off?(event: string, handler?: (...args: any[]) => unknown): void;
+  }
+
   interface FoundryGame {
     ready?: boolean;
     version?: string;
@@ -233,6 +253,8 @@ declare global {
     settings: FoundrySettings;
     modules?: { get(id: string): FoundryModule | undefined } | null;
     i18n?: { localize(key: string): string } | null;
+    /** Undefined until `ready`. Every read of it is guarded. */
+    socket?: FoundrySocket | null;
   }
 
   interface FoundryNotifications {

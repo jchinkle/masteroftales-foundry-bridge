@@ -5,10 +5,10 @@ import type { BridgeWelcomePayload, Envelope } from "../protocol/types.js";
 /**
  * The inbound command dispatcher.
  *
- * v0.3.0 understands four types — `bridge.welcome` and `session.state`, which
- * carry session state, and slice 4's `dice.show` and `chat.post`, which are
- * rendered into Foundry by `commands/dice.ts` and `commands/chat.ts`. Everything
- * else is ignored, and that is the point. Rule 1 of the protocol: **an unknown
+ * It understands five types — `bridge.welcome` and `session.state`, which carry
+ * session state, and `dice.show`, `chat.post` and `image.show`, which are acted
+ * on by `commands/dice.ts`, `commands/chat.ts` and `commands/images.ts`.
+ * Everything else is ignored, and that is the point. Rule 1 of the protocol: **an unknown
  * `type` is ignored, not errored.** A module a version ahead of the server (or
  * behind it) loses a feature; it does not lose the connection, and it does not
  * fill a customer's console with red.
@@ -64,6 +64,14 @@ export interface CommandDeps {
   onDiceShow?(payload: unknown): void;
   /** Renders `chat.post`. Optional, for the same reason. */
   onChatPost?(payload: unknown): void;
+  /**
+   * Handles `image.show`. Optional, for the same reason again — but note that
+   * "renders" is the wrong verb here: this one re-broadcasts over Foundry's own
+   * module socket and only renders locally when the GM is a target. See
+   * commands/images.ts, which is the one command whose work happens on machines
+   * other than this one.
+   */
+  onImageShow?(payload: unknown): void;
   log?: CommandLog;
 }
 
@@ -74,9 +82,10 @@ export interface CommandDeps {
  * the wire: an object lookup would answer `"toString"` with something inherited
  * and truthy, and this table has to be able to say "no" to any string at all.
  */
-const RENDERED = new Map<string, keyof Pick<CommandDeps, "onDiceShow" | "onChatPost">>([
+const RENDERED = new Map<string, keyof Pick<CommandDeps, "onDiceShow" | "onChatPost" | "onImageShow">>([
   ["dice.show", "onDiceShow"],
   ["chat.post", "onChatPost"],
+  ["image.show", "onImageShow"],
 ]);
 
 /**
