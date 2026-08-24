@@ -107,6 +107,12 @@ it land — whereas an inventory is read off a sheet nobody else may open. Your 
 own characters' loot is public as normal, and an actor whose ownership the module cannot
 read is treated as the GM's.
 
+**And the token itself.** It is stored in the GM's browser and nowhere else (see *About the
+token*), which makes one thing structural rather than a promise: the handout fetch — the
+one request this module makes *for* your project's writing rather than about your table —
+can only ever run on the GM's client. A player's browser has no key to make it with, and
+the content it brings back is the version Master of Tales already stripped for players.
+
 ### Turning families off
 
 **Capture toggles live in Master of Tales, not here.** Per-family switches — combat,
@@ -133,6 +139,15 @@ connects *in* to your Foundry, and no port needs opening):
   Foundry image popout, and the picture is loaded straight from the URL MoT sent, which may
   be a MoT upload or a path to a file already in your own Foundry. Only `http(s)` and
   in-Foundry paths are accepted; anything else is refused unopened.
+- **Handouts** — a page shown from Master of Tales arrives in Foundry as a **journal
+  entry**, filed in a folder called *Master of Tales*, and opens on the screens you picked.
+  This is the one direction in which your own writing travels *into* Foundry, and only the
+  **player-safe version of it**: Master of Tales strips whatever the page keeps back from
+  players before it sends a word, and the module has no way to ask for the rest. Showing
+  the same page again **updates the same entry in place** rather than making a second one,
+  so your players keep the letter between sessions and can reopen it from their sidebar
+  whenever they like. Paper and ink do not travel with it: a Foundry journal wears
+  Foundry's look, honestly, rather than a pastiche of MoT's.
 
 Dice and announcements are created by the **active GM's client only**, so the table sees
 one message rather than one per open browser, and both carry a flag that stops this module
@@ -146,13 +161,20 @@ over Foundry's own connection — the same one Foundry uses for everything else,
 one, and never anything leaving your network. Each client then decides for itself whether
 it was one of the people asked for.
 
+Handouts need none of that, and the difference is worth a sentence: a journal entry *is* a
+document, so once the GM's client has written it Foundry copies it to the players it is
+shared with by itself. The GM's client is the only one that fetches anything, because it is
+the only one holding a token — see below.
+
 Anything else MoT may send is ignored quietly: a server that has shipped a feature your
 module has not costs you the feature, never the connection.
 
 Nothing else is read or sent. The module reads documents **only as they change**, through
 the hooks listed above — it never walks your world, and it never sends anything anywhere
-except the server URL you configured. Your journals, compendia and files are not read at
-all; actors, tokens and scenes are read only at the moment one of them changes during play,
+except the server URL you configured. Your compendia and files are not read at all, and
+your journals are read only far enough to find the handout entries this module wrote
+before, by a flag it stamped on them — their contents are never sent anywhere. Actors,
+tokens and scenes are read only at the moment one of them changes during play,
 and only for the handful of fields named above (name, image, hit points, conditions,
 disposition, coin). Character sheets are not uploaded, and neither is anything you have not
 touched.
@@ -178,6 +200,10 @@ typed it. If two people GM your world, each pastes the key on their own machine.
   in to that world (display names only). The image is loaded as a picture and nothing else
   — the URL must be `http(s)` or a path inside that Foundry, and a `javascript:` or `data:`
   one is refused before it reaches the browser.
+- Read the **player-safe text of that project's shared pages**, one at a time and by id, and
+  cause one of them to be written into the journal of a Foundry connected with a key for the
+  same project. Not the pages themselves — only what that project already lets its players
+  read, and nothing at all from a page that has not been shared.
 
 And that is the list. An `mtb_` key cannot read your documents, cannot see your assets,
 cannot touch any other project, and does not identify you as a user anywhere. This is
@@ -218,8 +244,8 @@ envelope that comes out.
 
 The commands coming the other way are built the same way. `src/commands/` turns a payload
 into a *plan* — a validated, escaped, Foundry-free value — and only then hands the plan to
-the two Foundry classes it needs, which are looked up by feature detection so the same
-bundle works on v13 and v14. A malformed command drops calmly at debug volume rather than
+the handful of Foundry classes it needs, which are looked up by feature detection so the
+same bundle works on v13 and v14. A malformed command drops calmly at debug volume rather than
 throwing, because a command that cannot be rendered should cost you an animation, not the
 socket that tells the chip a session went live.
 

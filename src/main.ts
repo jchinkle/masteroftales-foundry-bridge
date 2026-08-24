@@ -11,6 +11,8 @@ import { PriorValues } from "./capture/priorValues.js";
 import { registerSceneCapture } from "./capture/scenes.js";
 import { createChatPostHandler, resolveChatMessageClass } from "./commands/chat.js";
 import { createDiceShowHandler, resolveDiceApi } from "./commands/dice.js";
+import type { HandoutResponse } from "./commands/handouts.js";
+import { createHandoutShowHandler, resolveJournalApi } from "./commands/handouts.js";
 import type { ImagePlan, ImageShowSocketEvent } from "./commands/images.js";
 import {
   createImageShowHandler,
@@ -27,6 +29,7 @@ import { MODULE_ID, MODULE_VERSION } from "./protocol/version.js";
 import type { BridgeSettings } from "./settings.js";
 import {
   EVENTS_PATH,
+  handoutPath,
   isConfigured,
   readSettings,
   registerSettings,
@@ -161,6 +164,18 @@ class Bridge {
         emit: (event) => emitToClients(event),
         selfId: () => game.user?.id ?? null,
         renderLocal: (plan) => renderLocally(plan),
+        log,
+      }),
+      // Back to one client for this one, and more firmly than the others: the
+      // handout's content is fetched over the bridge token, which is
+      // client-scoped and therefore exists in exactly one browser. Foundry
+      // replicates the journal entry that comes out of it, and `Journal.show`
+      // does the pushing — so there is no module-socket half here at all.
+      onHandoutShow: createHandoutShowHandler({
+        isActive: () => this.isActive(),
+        fetch: (nodeId) => this.fetchHandout(nodeId),
+        api: () => resolveJournalApi(globalThis),
+        world: () => ({ entries: () => game.journal, folders: () => game.folders }),
         log,
       }),
     });
@@ -331,6 +346,35 @@ class Bridge {
     }
 
     return { status: response.status, body, retryAfter: response.headers.get("Retry-After") };
+  }
+
+  /**
+   * One handout's player-safe content. Same headers as `postBatch`, same token,
+   * pointed at a GET — and the same contract as every other transport in this
+   * file: it reports what happened rather than throwing, except where the
+   * network itself refused, which `commands/handouts.ts` catches.
+   */
+  private async fetchHandout(nodeId: string): Promise<HandoutResponse> {
+    const check = checkServerUrl(this.settings.serverUrl);
+    if (!check.ok) throw new Error(check.reason ?? "Invalid server URL");
+
+    const response = await fetch(apiUrl(check.normalized ?? this.settings.serverUrl, handoutPath(nodeId)), {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${this.settings.apiToken}`,
+        Accept: "application/json",
+      },
+    });
+
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      // A 404 from a server that predates this command is HTML from a proxy as
+      // often as it is JSON. The status is the part that matters.
+    }
+
+    return { status: response.status, body };
   }
 
   /**

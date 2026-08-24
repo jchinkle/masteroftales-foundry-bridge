@@ -5,9 +5,10 @@ import type { BridgeWelcomePayload, Envelope } from "../protocol/types.js";
 /**
  * The inbound command dispatcher.
  *
- * It understands five types — `bridge.welcome` and `session.state`, which carry
- * session state, and `dice.show`, `chat.post` and `image.show`, which are acted
- * on by `commands/dice.ts`, `commands/chat.ts` and `commands/images.ts`.
+ * It understands six types — `bridge.welcome` and `session.state`, which carry
+ * session state, and `dice.show`, `chat.post`, `image.show` and `handout.show`,
+ * which are acted on by `commands/dice.ts`, `commands/chat.ts`,
+ * `commands/images.ts` and `commands/handouts.ts`.
  * Everything else is ignored, and that is the point. Rule 1 of the protocol: **an unknown
  * `type` is ignored, not errored.** A module a version ahead of the server (or
  * behind it) loses a feature; it does not lose the connection, and it does not
@@ -15,7 +16,7 @@ import type { BridgeWelcomePayload, Envelope } from "../protocol/types.js";
  *
  * The two session types carry the same `{status, id, name}` object, which is why
  * that parsing lives in `protocol/session.ts` and this file only decides where in
- * the envelope to look for it. The two render types are handed to callbacks the
+ * the envelope to look for it. The render types are handed to callbacks the
  * caller supplies, so this file stays free of every Foundry global.
  */
 
@@ -72,6 +73,15 @@ export interface CommandDeps {
    * other than this one.
    */
   onImageShow?(payload: unknown): void;
+  /**
+   * Handles `handout.show`. Optional, for the same reason again — and "renders"
+   * is the wrong verb for this one too. It fetches the page's player-safe
+   * markdown from MoT over the bridge token, writes it into the world as a
+   * JournalEntry, and lets Foundry show that document to the targets. Unlike
+   * `image.show` all of that happens on this one client. See
+   * commands/handouts.ts.
+   */
+  onHandoutShow?(payload: unknown): void;
   log?: CommandLog;
 }
 
@@ -82,10 +92,14 @@ export interface CommandDeps {
  * the wire: an object lookup would answer `"toString"` with something inherited
  * and truthy, and this table has to be able to say "no" to any string at all.
  */
-const RENDERED = new Map<string, keyof Pick<CommandDeps, "onDiceShow" | "onChatPost" | "onImageShow">>([
+const RENDERED = new Map<
+  string,
+  keyof Pick<CommandDeps, "onDiceShow" | "onChatPost" | "onImageShow" | "onHandoutShow">
+>([
   ["dice.show", "onDiceShow"],
   ["chat.post", "onChatPost"],
   ["image.show", "onImageShow"],
+  ["handout.show", "onHandoutShow"],
 ]);
 
 /**

@@ -837,3 +837,259 @@ export function documentContext(overrides: Partial<DocumentContext> = {}): Docum
     ...overrides,
   };
 }
+
+// ---------------------------------------------------------------- journals
+//
+// `handout.show`'s stubs, and the one behaviour a naive fake would get wrong:
+// **a Foundry collection is a Map subclass**, so these expose `.contents` and
+// iterate documents rather than `[id, doc]` pairs — which is exactly the trap
+// `values()` in commands/handouts.ts exists to avoid. They also model the two
+// document rules the write path depends on: `update` *merges* rather than
+// replaces (Foundry's own ownership semantics, and the reason a player keeps a
+// letter they were handed last session), and `create` returns the document.
+
+export interface FakePageOptions {
+  name?: string | null;
+  type?: string;
+  text?: { markdown?: string; content?: string; format?: number };
+}
+
+/** A `JournalEntryPage`. Ids are minted here; Foundry mints them server-side. */
+let pageSequence = 0;
+
+export class FakeJournalPage {
+  readonly id = `page${(pageSequence += 1)}`;
+  name: string | null = null;
+  type = "text";
+  text: { markdown?: string; content?: string; format?: number } = {};
+
+  /** Every `update` call, exactly as it arrived. */
+  readonly updates: Record<string, unknown>[] = [];
+
+  constructor(data: Record<string, unknown> = {}) {
+    this.apply(data);
+  }
+
+  update(data: Record<string, unknown>): Promise<unknown> {
+    this.updates.push(data);
+    this.apply(data);
+    return Promise.resolve(this);
+  }
+
+  private apply(data: Record<string, unknown>): void {
+    if (typeof data.name === "string") this.name = data.name;
+    if (typeof data.type === "string") this.type = data.type;
+    if (data.text && typeof data.text === "object") Object.assign(this.text, data.text);
+  }
+}
+
+/** A `JournalEntry`, pages and all. */
+export class FakeJournalEntry {
+  name: string | null = null;
+  flags: Record<string, unknown> = {};
+  ownership: Record<string, number> = {};
+  folder: string | null = null;
+
+  readonly pages: FakeCollection<FakeJournalPage>;
+  readonly updates: Record<string, unknown>[] = [];
+
+  constructor(
+    readonly id: string,
+    data: Record<string, unknown> = {},
+  ) {
+    const pages = Array.isArray(data.pages) ? (data.pages as Record<string, unknown>[]) : [];
+    this.pages = new FakeCollection(pages.map((page) => new FakeJournalPage(page)));
+    this.apply(data);
+  }
+
+  update(data: Record<string, unknown>): Promise<unknown> {
+    this.updates.push(data);
+    this.apply(data);
+    return Promise.resolve(this);
+  }
+
+  createEmbeddedDocuments(embeddedName: string, data: Record<string, unknown>[]): Promise<unknown> {
+    if (embeddedName !== "JournalEntryPage") throw new Error(`no such embedded document: ${embeddedName}`);
+    const created = data.map((page) => new FakeJournalPage(page));
+    for (const page of created) this.pages.push(page);
+    return Promise.resolve(created);
+  }
+
+  private apply(data: Record<string, unknown>): void {
+    if (typeof data.name === "string") this.name = data.name;
+    if (typeof data.folder === "string") this.folder = data.folder;
+    // Merged, never replaced — Foundry's own update semantics for both of these.
+    if (data.flags && typeof data.flags === "object") Object.assign(this.flags, data.flags);
+    if (data.ownership && typeof data.ownership === "object") {
+      Object.assign(this.ownership, data.ownership as Record<string, number>);
+    }
+  }
+}
+
+/** A `Folder`. */
+export class FakeFolder {
+  name: string | null = null;
+  type: string | null = null;
+  flags: Record<string, unknown> = {};
+
+  constructor(
+    readonly id: string,
+    data: Record<string, unknown> = {},
+  ) {
+    if (typeof data.name === "string") this.name = data.name;
+    if (typeof data.type === "string") this.type = data.type;
+    if (data.flags && typeof data.flags === "object") Object.assign(this.flags, data.flags);
+  }
+}
+
+/**
+ * A Foundry collection: a Map keyed by id, with the documented `.contents`
+ * array accessor. Spreading it yields `[id, doc]` pairs, exactly as the real
+ * thing does — which is the whole reason this is a Map and not an array.
+ */
+export class FakeCollection<T extends { id: string }> extends Map<string, T> {
+  constructor(documents: T[] = []) {
+    super(documents.map((doc) => [doc.id, doc]));
+  }
+
+  get contents(): T[] {
+    return [...this.values()];
+  }
+
+  push(doc: T): void {
+    this.set(doc.id, doc);
+  }
+}
+
+export interface FakeJournalOptions {
+  /** Entries already in the world. */
+  entries?: FakeJournalEntry[];
+  /** Folders already in the world, of any type. */
+  folders?: FakeFolder[];
+  /** Leave false to model a Foundry whose markdown converter moved. */
+  converter?: boolean;
+  /** Make `JournalEntry.create` resolve to null, the way a refused create does. */
+  createReturnsNull?: boolean;
+  /** Make `Journal.show` reject, the way a client mid-teardown does. */
+  showRejects?: boolean;
+}
+
+export interface FakeJournalShow {
+  doc: unknown;
+  options: Record<string, unknown>;
+}
+
+export interface FakeJournal {
+  /** A v13/v14 scope: the classes live under `foundry.documents…`. */
+  v13Scope: Record<string, unknown>;
+  /** A v12-era scope: bare globals only. */
+  legacyScope: Record<string, unknown>;
+  /** `game.journal` and `game.folders`, as the handler reads them. */
+  world: { entries(): unknown; folders(): unknown };
+  entries: FakeCollection<FakeJournalEntry>;
+  folders: FakeCollection<FakeFolder>;
+  /** Every `Journal.show`, in order. */
+  shown: FakeJournalShow[];
+  /** Every `JournalEntry.create` / `Folder.create` argument, in order. */
+  createdEntries: Record<string, unknown>[];
+  createdFolders: Record<string, unknown>[];
+  /**
+   * Anything that reached the **deprecated bare globals** on the v13 scope. Must
+   * stay empty: on v13 both spellings exist, and reaching for the global first
+   * is the mistake this bucket is here to catch.
+   */
+  decoyed: string[];
+}
+
+/** The markdown Foundry's own converter would make of this — near enough for a test. */
+function fakeMakeHtml(markdown: string): string {
+  return `<p>${markdown.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")}</p>`;
+}
+
+export function createJournal(options: FakeJournalOptions = {}): FakeJournal {
+  const entries = new FakeCollection<FakeJournalEntry>(options.entries ?? []);
+  const folders = new FakeCollection<FakeFolder>(options.folders ?? []);
+  const shown: FakeJournalShow[] = [];
+  const createdEntries: Record<string, unknown>[] = [];
+  const createdFolders: Record<string, unknown>[] = [];
+  const decoyed: string[] = [];
+
+  let sequence = 0;
+  const nextId = (prefix: string): string => `${prefix}${(sequence += 1)}`;
+
+  function Journal(): void {
+    /* never constructed */
+  }
+  Journal.show = (doc: unknown, showOptions: Record<string, unknown>): Promise<unknown> => {
+    shown.push({ doc, options: showOptions });
+    return options.showRejects ? Promise.reject(new Error("no application layer")) : Promise.resolve(doc);
+  };
+
+  function JournalEntry(): void {
+    /* never constructed */
+  }
+  JournalEntry.create = (data: Record<string, unknown>): Promise<unknown> => {
+    createdEntries.push(data);
+    if (options.createReturnsNull) return Promise.resolve(null);
+    const entry = new FakeJournalEntry(nextId("entry"), data);
+    entries.push(entry);
+    return Promise.resolve(entry);
+  };
+
+  function Folder(): void {
+    /* never constructed */
+  }
+  Folder.create = (data: Record<string, unknown>): Promise<unknown> => {
+    createdFolders.push(data);
+    const folder = new FakeFolder(nextId("folder"), data);
+    folders.push(folder);
+    return Promise.resolve(folder);
+  };
+
+  const decoy = (name: string, method: string): Record<string, unknown> => {
+    const stub = (): void => undefined;
+    (stub as unknown as Record<string, unknown>)[method] = (): Promise<unknown> => {
+      decoyed.push(name);
+      return Promise.resolve(null);
+    };
+    return stub as unknown as Record<string, unknown>;
+  };
+
+  const CONST = {
+    JOURNAL_ENTRY_PAGE_FORMATS: { HTML: 1, MARKDOWN: 2 },
+    DOCUMENT_OWNERSHIP_LEVELS: { INHERIT: -1, NONE: 0, LIMITED: 1, OBSERVER: 2, OWNER: 3 },
+  };
+
+  const markdownSheet = { _converter: { makeHtml: fakeMakeHtml } };
+  const sheets = options.converter === false ? {} : { MarkdownJournalPageSheet: markdownSheet };
+
+  return {
+    entries,
+    folders,
+    shown,
+    createdEntries,
+    createdFolders,
+    decoyed,
+    world: { entries: () => entries, folders: () => folders },
+    v13Scope: {
+      foundry: {
+        documents: { collections: { Journal }, JournalEntry, Folder },
+        appv1: { sheets },
+        CONST,
+      },
+      // The deprecated aliases a real v13 also carries. Resolution must never
+      // reach these.
+      Journal: decoy("Journal", "show"),
+      JournalEntry: decoy("JournalEntry", "create"),
+      Folder: decoy("Folder", "create"),
+      CONST,
+    },
+    legacyScope: {
+      Journal,
+      JournalEntry,
+      Folder,
+      CONST,
+      ...(options.converter === false ? {} : { MarkdownJournalPageSheet: markdownSheet }),
+    },
+  };
+}

@@ -33,6 +33,22 @@ export const EVENTS_PATH = "/api/v1/bridge/events";
  */
 export const HANDSHAKE_PATH = "/api/v1/bridge/handshake";
 
+/**
+ * One handout's player-safe content, by MoT node id.
+ *
+ * The only endpoint this module *reads* a project's own writing from, and the
+ * reason it is a fetch rather than a fatter bridge command: a page is prose, the
+ * command socket carries session state and dice, and a letter three screens long
+ * has no business travelling down it just so the module can decide whether to
+ * write it. The bridge command carries the id; this carries the words.
+ *
+ * `encodeURIComponent` on top of `planHandoutShow`'s own refusal of slashes and
+ * whitespace — belt and braces, and cheap.
+ */
+export function handoutPath(nodeId: string): string {
+  return `/api/v1/bridge/handouts/${encodeURIComponent(nodeId)}`;
+}
+
 export interface BridgeSettings {
   serverUrl: string;
   apiToken: string;

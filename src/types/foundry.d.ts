@@ -210,6 +210,54 @@ declare global {
     active?: boolean | null;
   }
 
+  // ------------------------------------------------------------- journals
+  //
+  // `handout.show`'s half of the world. This is the only family the module
+  // *writes*, so unlike everything above these carry the mutators too — and
+  // only the mutators commands/handouts.ts actually calls.
+
+  /** One page of a journal entry. Text pages are the only kind this module writes. */
+  interface FoundryJournalEntryPage extends FoundryDocument {
+    /** `"text"`, `"image"`, `"pdf"`, `"video"` — a system or module may add more. */
+    type?: string | null;
+    /**
+     * `content` is the HTML the reader is shown; `markdown` is the source, kept
+     * when `format` is `CONST.JOURNAL_ENTRY_PAGE_FORMATS.MARKDOWN`. Both are
+     * written together — see `handoutPageData`.
+     */
+    text?: { content?: string | null; markdown?: string | null; format?: number | null } | null;
+    update(data: Record<string, unknown>): unknown;
+  }
+
+  /**
+   * A journal entry. `pages` is an `EmbeddedCollection`, which is a Map
+   * subclass — read it through a `.contents`-aware helper, never by spreading.
+   */
+  interface FoundryJournalEntry extends FoundryDocument {
+    folder?: FoundryFolder | string | null;
+    ownership?: Record<string, number> | null;
+    pages?: unknown;
+    update(data: Record<string, unknown>): unknown;
+    createEmbeddedDocuments(embeddedName: string, data: Record<string, unknown>[]): unknown;
+  }
+
+  /** A sidebar folder. `type` names the document family it holds. */
+  interface FoundryFolder extends FoundryDocument {
+    type?: string | null;
+    folder?: FoundryFolder | string | null;
+  }
+
+  /**
+   * A `WorldCollection`. Only its iteration surface is described: the module
+   * finds its own documents by flag, and Foundry's own `get`-by-id is no use for
+   * that.
+   */
+  interface FoundryWorldCollection<T> extends Iterable<T> {
+    get?(id: string): T | undefined;
+    contents?: T[];
+    size?: number;
+  }
+
   // -------------------------------------------------------------------- game
 
   interface FoundrySettings {
@@ -255,6 +303,10 @@ declare global {
     i18n?: { localize(key: string): string } | null;
     /** Undefined until `ready`. Every read of it is guarded. */
     socket?: FoundrySocket | null;
+    /** Every JournalEntry in the world this client may see. `handout.show`'s id map. */
+    journal?: FoundryWorldCollection<FoundryJournalEntry> | null;
+    /** Every Folder, of every type. Filtered to `"JournalEntry"` before use. */
+    folders?: FoundryWorldCollection<FoundryFolder> | null;
   }
 
   interface FoundryNotifications {
