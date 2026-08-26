@@ -31,6 +31,7 @@ import {
 import type { SessionSummary } from "./commands/index.js";
 import { createDispatcher, NO_SESSION } from "./commands/index.js";
 import type { ActorCatalogBody } from "./protocol/actors.js";
+import { resolveAssetBase } from "./protocol/actors.js";
 import { readRoster } from "./protocol/roster.js";
 import type { BridgeInfo, Envelope, EventBatch } from "./protocol/types.js";
 import { MODULE_ID, MODULE_VERSION } from "./protocol/version.js";
@@ -157,6 +158,11 @@ class Bridge {
     this.announceActors = createActorsRequestHandler({
       isActive: () => this.isActive() && isConfigured(this.settings),
       actors: () => game.actors,
+      // Read per request rather than once at construction. The route prefix is
+      // fixed for the life of a client, but `resolveAssetBase` also reads
+      // `location`, and a module constructed before `ready` is exactly the case
+      // that would cache a null and then report every portrait as absent.
+      assetBase: () => resolveAssetBase(globalThis),
       bridgeInfo,
       post: (body) => this.postActors(body),
       log,

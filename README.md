@@ -201,7 +201,11 @@ configured. It walks your world in exactly one place — the actor list describe
 is ids, names, portrait paths and types, and never a sheet. Your compendia and files are not
 read at all, and your journals are read only far enough to find the handout entries this
 module wrote before, by a flag it stamped on them — their contents are never sent anywhere.
-Beyond that listing, actors, tokens and scenes are read only at the moment one of them
+A portrait travels as a **link back to your own Foundry** — its address and route prefix in
+front of the path Foundry stores — rather than as a picture. The file stays on your machine
+and only the browser you are picking monsters in ever asks for it, which is also why a
+Foundry that is shut is simply a list with no portraits in it that evening. Beyond that
+listing, actors, tokens and scenes are read only at the moment one of them
 changes during play,
 and only for the handful of fields named above (name, image, hit points, conditions,
 disposition, coin). Character sheets are not uploaded, and neither is anything you have not

@@ -43,7 +43,17 @@ export interface BridgeActor {
    * a thing the keeper can match against their own directory.
    */
   name: string;
-  /** Portrait or token art. Null when the actor has none this module can read. */
+  /**
+   * Portrait or token art, as an **absolute URL**. Null when the actor has none
+   * this module can read, or when this client could not work out its own address.
+   *
+   * Absolute rather than the `icons/creatures/goblin.webp` Foundry stores,
+   * because the only browser that ever renders this string is pointed at
+   * masteroftales.com, where a relative path resolves against MoT's own host and
+   * 404s as a broken square. This client is the one end that knows where the
+   * pictures live — it is *in* the Foundry — so it says so. See
+   * {@link absoluteAssetUrl}.
+   */
   img: string | null;
   /** The system's own actor type: `"npc"`, `"character"`, `"vehicle"`… */
   type: string | null;
@@ -59,14 +69,22 @@ export interface ActorCatalogBody {
 export const MAX_ACTOR_NAME_LENGTH = 120;
 
 /**
- * An asset path longer than this is dropped rather than truncated.
+ * An asset URL longer than this is dropped rather than truncated.
  *
  * Truncating a path produces a *different* path, which is the one failure mode
  * worse than a missing picture: the picker would ask the browser for a file that
  * does not exist and show a broken image where a portrait should be. Absent over
  * wrong, exactly as the capture layer reads documents.
+ *
+ * It governs the **reported** string rather than the raw `actor.img`, and it was
+ * 500 when that was the same thing. An absolutized URL carries an origin and any
+ * route prefix in front of the world path, so the old number would start dropping
+ * portraits this module used to send. A thousand still sits well inside the
+ * server's own 2,000-character truncation of the column, and a catalog is capped
+ * at {@link MAX_CATALOG_ACTORS} rows, so the worst case is a POST a browser sends
+ * without thinking about it.
  */
-export const MAX_ACTOR_PATH_LENGTH = 500;
+export const MAX_ACTOR_PATH_LENGTH = 1_000;
 
 /** System type keys are short handles. Anything longer is not one. */
 export const MAX_ACTOR_TYPE_LENGTH = 60;
@@ -86,13 +104,16 @@ export const MAX_CATALOG_ACTORS = 500;
  *
  * Pure in the sense that matters: it takes the collection rather than reaching
  * for the `game` global, so a v13 collection, a v14 one, a plain array of source
- * objects and a client that is still booting are all unit tests.
+ * objects and a client that is still booting are all unit tests. `base` is this
+ * Foundry's own address — {@link resolveAssetBase} is what reads it off the
+ * globals, and it is a required argument rather than an optional one so a call
+ * site cannot quietly go back to shipping relative paths.
  *
  * Never throws and never invents. An actor without a usable string id is skipped
  * entirely — the id is the only field the whole feature turns on, and a catalog
  * row that cannot be pointed at is worse than an absent one.
  */
-export function collectActorCatalog(actors: unknown): BridgeActor[] {
+export function collectActorCatalog(actors: unknown, base: string | null): BridgeActor[] {
   const catalog: BridgeActor[] = [];
 
   for (const actor of collectionValues<FoundryActor>(actors)) {
@@ -105,12 +126,133 @@ export function collectActorCatalog(actors: unknown): BridgeActor[] {
     catalog.push({
       id,
       name: capped(actor.name, MAX_ACTOR_NAME_LENGTH) ?? id,
-      img: whole(actor.img, MAX_ACTOR_PATH_LENGTH),
+      img: actorImage(actor.img, base),
       type: whole(actor.type, MAX_ACTOR_TYPE_LENGTH),
     });
   }
 
   return catalog;
+}
+
+/**
+ * Foundry's word for a picture — `icons/creatures/goblin.webp`,
+ * `worlds/barovia/tokens/ireena.png` — made into a URL a browser somewhere else
+ * entirely can fetch.
+ *
+ * Pure, and takes the base as a string, because "where is this Foundry?" is the
+ * one question in the file a laptop cannot answer by running the suite.
+ *
+ * Four cases, and each is a decision:
+ *
+ *  1. **A relative path** is resolved against `base`, which carries the origin
+ *     *and* the route prefix. `new URL` is doing the work rather than string
+ *     concatenation, so `../`, an already-percent-encoded path and a path with a
+ *     space in it all come out right — the last of these better than before,
+ *     since the encoding now happens here instead of in whichever browser
+ *     eventually renders it.
+ *  2. **Anything already carrying a scheme** passes through untouched. An https
+ *     URL is somebody's CDN or MoT's own upload and is already right; a `data:`
+ *     URI is self-contained and refers to no host at all. Neither is ours to
+ *     rewrite. (In practice a `data:` portrait is longer than the cap below and
+ *     is therefore dropped, which is the right end for a catalog that would
+ *     otherwise carry five hundred inlined images.)
+ *  3. **No base** — a client whose `location` this module could not read —
+ *     returns null rather than the bare path. A relative path is not a URL that
+ *     is merely worse; it is one that resolves against the *wrong server*, and
+ *     the picker draws a broken square for it. Absent over wrong, again.
+ *  4. **Control characters** are refused outright, for `commands/images.ts`'s
+ *     reason: `URL` strips tabs, newlines and returns *before* parsing, so a
+ *     value carrying one would be reported as a path nobody stored. A plain
+ *     space is not one of them and is fine — Foundry worlds are full of
+ *     `tokens/old man.webp`, and `URL` percent-encodes it honestly.
+ */
+export function absoluteAssetUrl(value: string | null, base: string | null): string | null {
+  if (value === null) return null;
+  if (/[\u0000-\u001f\u007f]/.test(value)) return null;
+
+  // Any scheme at all — `https:`, `data:`, and the ones nobody has thought of.
+  // The picker on the other end decides what it is willing to render.
+  if (/^[a-z][a-z0-9+.\-]*:/i.test(value)) return value;
+
+  if (base === null) return null;
+
+  try {
+    return new URL(value, base).href;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * This Foundry's address, as a base URL with a trailing slash — the thing every
+ * relative asset path in the world is spelled against.
+ *
+ * Takes the global scope as an argument for `resolveImagePopout`'s reason: this
+ * is the single place the module asks the client where it is, and reading it
+ * from a passed-in scope makes a routed install, an unrouted one and a headless
+ * test three unit tests rather than three bug reports.
+ *
+ * **Route-prefix aware**, which is the whole reason it is not one line.
+ * A Foundry served at `https://home.example/foundry/` reports its actor art as
+ * `icons/goblin.webp` all the same, and resolving that against the bare origin
+ * would produce a URL that 404s on the customer's own reverse proxy.
+ * `foundry.utils.getRoute` is the client's own answer and is asked first;
+ * `ROUTE_PREFIX` — the global it reads — is the fallback for a client where the
+ * namespaced helper has moved or has not booted yet.
+ *
+ * Null when there is no usable `location`, which is a test harness or a client
+ * mid-teardown. Callers report no picture rather than a wrong one.
+ */
+export function resolveAssetBase(scope: unknown): string | null {
+  if (!scope || typeof scope !== "object") return null;
+
+  const global = scope as Record<string, unknown>;
+  const origin = readOrigin(global.location);
+  if (origin === null) return null;
+
+  const routed = callGetRoute(global);
+  if (routed !== null) return joinBase(origin, routed);
+
+  const prefix = nonEmpty(global.ROUTE_PREFIX);
+  return joinBase(origin, prefix === null ? "/" : `/${prefix}/`);
+}
+
+/** `location.origin`, or the origin of `location.href` on a client that has only that. */
+function readOrigin(location: unknown): string | null {
+  if (!location || typeof location !== "object") return null;
+
+  const record = location as Record<string, unknown>;
+  const origin = nonEmpty(record.origin);
+  if (origin !== null && origin !== "null") return origin;
+
+  const href = nonEmpty(record.href);
+  if (href === null) return null;
+  try {
+    const parsed = new URL(href).origin;
+    return parsed === "null" ? null : parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** `foundry.utils.getRoute("/")` — the prefix as this client itself spells it. */
+function callGetRoute(global: Record<string, unknown>): string | null {
+  const utils = (global.foundry as { utils?: Record<string, unknown> } | undefined)?.utils;
+  const getRoute = utils?.getRoute;
+  if (typeof getRoute !== "function") return null;
+
+  try {
+    return nonEmpty((getRoute as (path: string) => unknown)("/"));
+  } catch {
+    // A helper that threw is a client we do not recognise. `ROUTE_PREFIX` next.
+    return null;
+  }
+}
+
+/** `https://host` + `/foundry/` -> `https://host/foundry/`. Always one trailing slash. */
+function joinBase(origin: string, path: string): string {
+  const suffix = path.startsWith("/") ? path : `/${path}`;
+  return `${origin.replace(/\/+$/, "")}${suffix.replace(/\/*$/, "/")}`;
 }
 
 /**
@@ -121,8 +263,8 @@ export function collectActorCatalog(actors: unknown): BridgeActor[] {
  * every batch and every heartbeat carries, which is what lets the server file the
  * catalog against the right world without a second lookup.
  */
-export function actorCatalogBody(actors: unknown, info: BridgeInfo): ActorCatalogBody {
-  return { bridge: info, actors: collectActorCatalog(actors) };
+export function actorCatalogBody(actors: unknown, info: BridgeInfo, base: string | null): ActorCatalogBody {
+  return { bridge: info, actors: collectActorCatalog(actors, base) };
 }
 
 function nonEmpty(value: unknown): string | null {
@@ -142,4 +284,17 @@ function whole(value: unknown, max: number): string | null {
   const trimmed = nonEmpty(value);
   if (trimmed === null || trimmed.length > max) return null;
   return trimmed;
+}
+
+/**
+ * `actor.img` as the wire carries it: trimmed, absolutized, and capped.
+ *
+ * The cap is applied **last**, to the string that actually goes out, because
+ * that is the one whose length the server stores and a browser requests. Dropped
+ * rather than truncated, for {@link MAX_ACTOR_PATH_LENGTH}'s reason.
+ */
+function actorImage(value: unknown, base: string | null): string | null {
+  const absolute = absoluteAssetUrl(nonEmpty(value), base);
+  if (absolute === null || absolute.length > MAX_ACTOR_PATH_LENGTH) return null;
+  return absolute;
 }

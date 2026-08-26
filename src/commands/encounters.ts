@@ -781,6 +781,17 @@ export interface ActorsRequestDeps {
   isActive(): boolean;
   /** `game.actors`, read per request. */
   actors(): unknown;
+  /**
+   * Where this Foundry's own pictures live — `resolveAssetBase(globalThis)`,
+   * read per request like the rest.
+   *
+   * Here rather than inside the protocol module because reading `location` and
+   * `foundry.utils` is touching a global, and this file is the one that is
+   * allowed to be handed those. Null on a client that could not answer, which
+   * reports portraits as absent rather than as paths that resolve against the
+   * wrong server. See `protocol/actors.ts`.
+   */
+  assetBase(): string | null;
   /** The same identity block every batch and heartbeat carries. */
   bridgeInfo(): BridgeInfo;
   /** `POST /api/v1/bridge/actors`, with the bearer token. */
@@ -806,7 +817,7 @@ export function createActorsRequestHandler(deps: ActorsRequestDeps): (payload?: 
 
     let body: ActorCatalogBody;
     try {
-      body = actorCatalogBody(deps.actors(), deps.bridgeInfo());
+      body = actorCatalogBody(deps.actors(), deps.bridgeInfo(), deps.assetBase());
     } catch (error) {
       // A client mid-teardown, where `game` has gone.
       deps.log?.debug?.("[masteroftales-bridge] could not build the actor catalog", error);
