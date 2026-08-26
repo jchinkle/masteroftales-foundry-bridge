@@ -9,7 +9,9 @@ import type { DocumentContext } from "./capture/documents.js";
 import { registerItemCapture } from "./capture/items.js";
 import { PriorValues } from "./capture/priorValues.js";
 import { registerSceneCapture } from "./capture/scenes.js";
-import { createActorCreateHandler, resolveActorApi, resolveFilePicker } from "./commands/actorCreate.js";
+import { createActorCreateHandler, resolveActorApi } from "./commands/actorCreate.js";
+import type { PlaceableActor } from "./commands/actorPlace.js";
+import { createActorPlaceHandler, resolveCanvas } from "./commands/actorPlace.js";
 import { createChatPostHandler, resolveChatMessageClass } from "./commands/chat.js";
 import { createDiceShowHandler, resolveDiceApi } from "./commands/dice.js";
 import type { ActorLike, EncounterPlan, Placement, ResolvedEntry } from "./commands/encounters.js";
@@ -31,6 +33,7 @@ import {
 } from "./commands/images.js";
 import type { SessionSummary } from "./commands/index.js";
 import { createDispatcher, NO_SESSION } from "./commands/index.js";
+import { resolveFilePicker } from "./commands/tokenImages.js";
 import type { ActorCatalogBody, ActorCreationBody } from "./protocol/actors.js";
 import { resolveAssetBase } from "./protocol/actors.js";
 import { readRoster } from "./protocol/roster.js";
@@ -244,6 +247,19 @@ class Bridge {
         report: (body) => this.postActorCreation(body),
         // The one command with a failure the keeper must see rather than read in
         // a console: they are standing in MoT waiting for the creature.
+        notify,
+        log,
+      }),
+      // Slice 7's other half, and the quietest command in the table: one token
+      // for a creature this world already has, onto the scene *this* screen is
+      // showing, centred where the GM is looking. No combat, no initiative, and
+      // no answer home — the token appearing is the answer. `canvas` is read per
+      // command like every other global here, because the scene changes.
+      onActorPlace: createActorPlaceHandler({
+        isActive: () => this.isActive(),
+        lookupActor: (actorId) => (game.actors?.get?.(actorId) as PlaceableActor | undefined) ?? null,
+        canvas: () => resolveCanvas(globalThis),
+        files: () => resolveFilePicker(globalThis),
         notify,
         log,
       }),

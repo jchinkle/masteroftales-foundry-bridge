@@ -7,11 +7,13 @@
  * the tests it supports stop being evidence.
  */
 
+import { Buffer } from "node:buffer";
 import type { SystemAdapter } from "../src/adapters/index.js";
 import type { DocumentContext } from "../src/capture/documents.js";
 import { PriorValues } from "../src/capture/priorValues.js";
 import type { ChatMessageClass } from "../src/commands/chat.js";
 import type { DiceApi } from "../src/commands/dice.js";
+import type { ActorImage, FilePickerApi } from "../src/commands/tokenImages.js";
 import type { SocketLike } from "../src/transport/socket.js";
 
 // -------------------------------------------------------------------- clock
@@ -1293,4 +1295,75 @@ export function createCombats(options: FakeCombatsOptions = {}): FakeCombats {
       return combats.contents[combats.contents.length - 1];
     },
   };
+}
+
+// -------------------------------------------------------------- token images
+
+/**
+ * Eight bytes that are honestly a PNG header and honestly nothing else. Nothing
+ * in the module inspects the pixels — the point of the fixture is that the bytes
+ * that come out the far end are the bytes that went in.
+ */
+export const PNG_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+export const PNG_BASE64 = Buffer.from(PNG_BYTES).toString("base64");
+export const PNG_DATA_URL = `data:image/png;base64,${PNG_BASE64}`;
+
+/** A validated picture, for the tests that start below the planner. */
+export function tokenImage(overrides: Partial<ActorImage> = {}): ActorImage {
+  return { mimeType: "image/png", base64: PNG_BASE64, filename: "bugbear.png", ...overrides };
+}
+
+export interface PickerOptions {
+  /** The directory listing, or null for a `browse` that throws (no such folder). */
+  files?: string[] | null;
+  createDirectoryRejects?: unknown;
+  uploadRejects?: boolean;
+  uploadResult?: unknown;
+  omitBrowse?: boolean;
+}
+
+export interface PickerTable {
+  api: FilePickerApi;
+  uploads: Array<{ source: string; path: string; file: File; options: unknown }>;
+  created: string[];
+  browsed: number;
+}
+
+/**
+ * A FilePicker with no Foundry behind it. Small on purpose — the moment a stub is
+ * complicated enough to have bugs, the tests it supports stop being evidence.
+ *
+ * Shared by both commands that carry a picture: `actor.create` and `actor.place`
+ * write through the same pipeline, and a second stub would be a second opinion
+ * about what Foundry's upload does.
+ */
+export function fakePicker(options: PickerOptions = {}): PickerTable {
+  const table: PickerTable = { api: {} as FilePickerApi, uploads: [], created: [], browsed: 0 };
+  let files = options.files === undefined ? [] : options.files;
+
+  const api: FilePickerApi = {
+    upload: (source, path, file, _body, uploadOptions) => {
+      if (options.uploadRejects) return Promise.reject(new Error("the data directory is read-only"));
+      table.uploads.push({ source, path, file: file as File, options: uploadOptions });
+      if (options.uploadResult !== undefined) return Promise.resolve(options.uploadResult);
+      return Promise.resolve({ status: "success", path: `${path}/${(file as File).name}` });
+    },
+    createDirectory: (_source, target) => {
+      if (options.createDirectoryRejects) return Promise.reject(options.createDirectoryRejects);
+      table.created.push(target);
+      files = files ?? [];
+      return Promise.resolve({ path: target });
+    },
+  };
+
+  if (!options.omitBrowse) {
+    api.browse = (_source, target) => {
+      table.browsed += 1;
+      if (files === null) return Promise.reject(new Error(`ENOENT: no such directory ${target}`));
+      return Promise.resolve({ target, dirs: [], files });
+    };
+  }
+
+  table.api = api;
+  return table;
 }

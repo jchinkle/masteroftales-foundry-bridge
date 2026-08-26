@@ -5,12 +5,12 @@ import type { BridgeWelcomePayload, Envelope } from "../protocol/types.js";
 /**
  * The inbound command dispatcher.
  *
- * It understands nine types — `bridge.welcome` and `session.state`, which carry
+ * It understands ten types — `bridge.welcome` and `session.state`, which carry
  * session state, and `dice.show`, `chat.post`, `image.show`, `handout.show`,
- * `encounter.deploy`, `actors.request` and `actor.create`, which are acted on by
- * `commands/dice.ts`, `commands/chat.ts`, `commands/images.ts`,
+ * `encounter.deploy`, `actors.request`, `actor.create` and `actor.place`, which
+ * are acted on by `commands/dice.ts`, `commands/chat.ts`, `commands/images.ts`,
  * `commands/handouts.ts`, `commands/encounters.ts` (which owns `encounter.deploy`
- * and `actors.request`) and `commands/actorCreate.ts`.
+ * and `actors.request`), `commands/actorCreate.ts` and `commands/actorPlace.ts`.
  * Everything else is ignored, and that is the point. Rule 1 of the protocol: **an unknown
  * `type` is ignored, not errored.** A module a version ahead of the server (or
  * behind it) loses a feature; it does not lose the connection, and it does not
@@ -107,6 +107,13 @@ export interface CommandDeps {
    * point its own page at a real actor. See commands/actorCreate.ts.
    */
   onActorCreate?(payload: unknown): void;
+  /**
+   * Handles `actor.place`. Optional, for the same reason again — and it is the
+   * quietest of the lot: one token for a creature this world already has, onto
+   * the scene the GM is looking at, centred in their current view. No combat, no
+   * initiative, no answer back to MoT. See commands/actorPlace.ts.
+   */
+  onActorPlace?(payload: unknown): void;
   log?: CommandLog;
 }
 
@@ -128,6 +135,7 @@ const RENDERED = new Map<
     | "onEncounterDeploy"
     | "onActorsRequest"
     | "onActorCreate"
+    | "onActorPlace"
   >
 >([
   ["dice.show", "onDiceShow"],
@@ -137,6 +145,7 @@ const RENDERED = new Map<
   ["encounter.deploy", "onEncounterDeploy"],
   ["actors.request", "onActorsRequest"],
   ["actor.create", "onActorCreate"],
+  ["actor.place", "onActorPlace"],
 ]);
 
 /**

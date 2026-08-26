@@ -183,6 +183,18 @@ connects *in* to your Foundry, and no port needs opening):
   Foundry's own id and name for it travel back so Master of Tales can point its page at
   *your* actor — and that is the entirety of what goes back. If any step fails, nothing is
   reported and Foundry says why on your screen.
+- **A single token** — a creature this world already has, put on the map you are currently
+  looking at, centred in your view. This is the encounter tray with the encounter taken out
+  of it: one token, **no combat, no initiative, no tracker**, for the evenings when you just
+  want the shopkeeper on the screen. The token is built from *your* prototype token — its
+  size, vision, disposition and link are the ones you configured — and it lands on the map
+  in front of **you**, never on the players' active scene, which is the difference that
+  matters when you are setting the next room up before revealing it. If you picked a piece
+  of token art in Master of Tales it travels the same way a new creature's does, into the
+  same `masteroftales-tokens` folder, and it dresses **that one token**: your actor's own
+  portrait and prototype are left exactly as you set them. Nothing goes back to Master of
+  Tales — the token appearing is the answer — and if there is no scene open, or the creature
+  is not in this world, nothing is placed and Foundry says why on your screen.
 
 Dice and announcements are created by the **active GM's client only**, so the table sees
 one message rather than one per open browser, and both carry a flag that stops this module
@@ -205,12 +217,17 @@ Encounters need less again. The tray is a window on the GM's own screen, and not
 it reaches a player until a token is on the map — at which point it is an ordinary Foundry
 token, and combat, initiative and the tracker are Foundry's from there on.
 
-Creating a creature is the one command that writes a **file**, and it is worth being exact
+Placing a single token needs less still: it is one document written to the scene already
+open on the GM's screen, and Foundry replicates it to the table exactly as it does a token
+dropped by hand.
+
+Carrying a picture is the only thing that writes a **file**, and it is worth being exact
 about which one: a single image, under `masteroftales-tokens/` in your world's data, named
-after the creature, created by the GM's client through Foundry's own upload. Nothing is read
-back out of that folder except the list of names already in it, which is how a second
-bugbear avoids overwriting the first. No other file, anywhere on your machine, is written or
-read.
+after the creature, created by the GM's client through Foundry's own upload. Two commands do
+it — creating a creature and placing a token wearing art you picked — and they write into
+that same one directory and nowhere else. Nothing is read back out of it except the list of
+names already in it, which is how a second bugbear avoids overwriting the first. No other
+file, anywhere on your machine, is written or read.
 
 Anything else MoT may send is ignored quietly: a server that has shipped a feature your
 module has not costs you the feature, never the connection.
@@ -220,7 +237,8 @@ the hooks listed above, and it never sends anything anywhere except the server U
 configured. It walks your world in exactly one place — the actor list described above, which
 is ids, names, portrait paths and types, and never a sheet. Your compendia are not read at
 all, and the only files it touches are the token pictures it writes for creatures you asked
-it to create — one directory, described above, never read back and never sent anywhere.
+it to create or to place — one directory, described above, never read back and never sent
+anywhere.
 Your journals are read only far enough to find the handout entries this
 module wrote before, by a flag it stamped on them — their contents are never sent anywhere.
 A portrait travels as a **link back to your own Foundry** — its address and route prefix in
@@ -260,8 +278,15 @@ typed it. If two people GM your world, each pastes the key on their own machine.
   read, and nothing at all from a page that has not been shared.
 - Ask that Foundry for its **actor list** — ids, names, portrait paths and system types, and
   none of the sheets behind them — and open a **token tray** on the GM's screen with a list
-  of monsters in it. Nothing lands on a map unless the GM drags it there, and the only thing
-  that follows from a placement is Foundry's own initiative roll for the token just placed.
+  of monsters in it. Nothing lands on a map from the tray unless the GM drags it there, and
+  the only thing that follows from a placement is Foundry's own initiative roll for the token
+  just placed.
+- Create an actor in that world, and **put one token on the scene the GM is looking at** —
+  each carrying a picture, which is written into the `masteroftales-tokens` folder described
+  above and nowhere else. A placed token is an ordinary token: it starts no combat, rolls
+  nothing, and changes no document that was already there. Both are as undoable as anything
+  else in Foundry — delete the token, delete the actor — and neither can touch a scene the
+  GM is not looking at.
 
 And that is the list. An `mtb_` key cannot read your documents, cannot see your assets,
 cannot touch any other project, and does not identify you as a user anywhere. This is

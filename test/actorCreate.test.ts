@@ -1,53 +1,36 @@
-import { Buffer } from "node:buffer";
 import { describe, expect, it, vi } from "vitest";
-import type { ActorCreationBody } from "../src/protocol/actors.js";
-import { actorCreationBody } from "../src/protocol/actors.js";
-import type { ActorImage, FilePickerApi } from "../src/commands/actorCreate.js";
 import {
   actorCreateData,
   actorTypeNames,
-  buildTokenFile,
   createActorCreateHandler,
-  DATA_SOURCE,
-  decodeBase64,
   defaultActorType,
-  extensionFor,
   FALLBACK_ACTOR_NAME,
-  FALLBACK_FILE_STEM,
   failureMessage,
   MAX_ACTOR_NAME_LENGTH,
-  MAX_DATA_URL_LENGTH,
   MAX_KEY_LENGTH,
-  parseImageDataUrl,
   planActorCreate,
-  prepareTokenDirectory,
-  readActorImage,
-  REASON_BAD_IMAGE,
   REASON_CREATE_FAILED,
   REASON_NO_ACTOR_API,
-  REASON_NO_FILE_API,
-  REASON_UPLOAD_FAILED,
   resolveActorApi,
-  resolveFilePicker,
-  safeFileName,
-  TOKEN_DIRECTORY,
-  uniqueFileName,
   unreportedMessage,
-  uploadedPath,
-  uploadTokenImage,
 } from "../src/commands/actorCreate.js";
 import { createDispatcher } from "../src/commands/index.js";
-import { MODULE_ID } from "../src/protocol/version.js";
-import { createLog, flushMicrotasks } from "./stubs.js";
+import {
+  REASON_BAD_IMAGE,
+  REASON_NO_FILE_API,
+  REASON_UPLOAD_FAILED,
+} from "../src/commands/tokenImages.js";
+import type { ActorCreationBody } from "../src/protocol/actors.js";
+import { actorCreationBody } from "../src/protocol/actors.js";
+import type { PickerOptions } from "./stubs.js";
+import { createLog, fakePicker, flushMicrotasks, PNG_BASE64, PNG_DATA_URL } from "./stubs.js";
 
 /**
- * Eight bytes that are honestly a PNG header and honestly nothing else. Nothing
- * in the module inspects the pixels — the point of the fixture is that the bytes
- * that come out the far end are the bytes that went in.
+ * `actor.create`, minus the picture pipeline it shares with `actor.place` — that
+ * lives in test/tokenImages.test.ts. What is tested here is the actor: the plan,
+ * the type the creature is created as, the `Actor.create` argument, and the
+ * handler's promise that a failure creates nothing and reports nothing.
  */
-const PNG_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
-const PNG_BASE64 = Buffer.from(PNG_BYTES).toString("base64");
-const PNG_DATA_URL = `data:image/png;base64,${PNG_BASE64}`;
 
 /** An `actor.create` payload as MoT broadcasts one. */
 function payload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -57,11 +40,6 @@ function payload(overrides: Record<string, unknown> = {}): Record<string, unknow
     image: { dataUrl: PNG_DATA_URL, filename: "ash-hollow-bugbear.png" },
     ...overrides,
   };
-}
-
-/** A validated picture, for the tests that start below the planner. */
-function image(overrides: Partial<ActorImage> = {}): ActorImage {
-  return { mimeType: "image/png", base64: PNG_BASE64, filename: "bugbear.png", ...overrides };
 }
 
 // ------------------------------------------------------------------ the plan
@@ -110,150 +88,6 @@ describe("planActorCreate", () => {
   });
 });
 
-describe("readActorImage", () => {
-  it("reads an absent picture as none, which creates an art-less actor", () => {
-    expect(readActorImage(null)).toEqual({ status: "none" });
-    expect(readActorImage(undefined)).toEqual({ status: "none" });
-  });
-
-  it("refuses a picture that is not the shape both ends agreed on", () => {
-    expect(readActorImage(PNG_DATA_URL).status).toBe("refused");
-    expect(readActorImage([{ dataUrl: PNG_DATA_URL }]).status).toBe("refused");
-    expect(readActorImage({}).status).toBe("refused");
-  });
-
-  it("names the picture from the mime type when MoT suggested nothing", () => {
-    const result = readActorImage({ dataUrl: PNG_DATA_URL });
-    expect(result).toEqual({
-      status: "ready",
-      image: { mimeType: "image/png", base64: PNG_BASE64, filename: `${FALLBACK_FILE_STEM}.png` },
-    });
-  });
-});
-
-// -------------------------------------------------------------- the data URL
-
-describe("parseImageDataUrl", () => {
-  it("reads a base64 image data URL", () => {
-    expect(parseImageDataUrl(PNG_DATA_URL)).toEqual({ mimeType: "image/png", base64: PNG_BASE64 });
-  });
-
-  it("accepts any image content type, and lower-cases it", () => {
-    expect(parseImageDataUrl(`DATA:IMAGE/WEBP;BASE64,${PNG_BASE64}`)?.mimeType).toBe("image/webp");
-    expect(parseImageDataUrl(`data:image/svg+xml;base64,${PNG_BASE64}`)?.mimeType).toBe("image/svg+xml");
-  });
-
-  it("carries media-type parameters without tripping over them", () => {
-    expect(parseImageDataUrl(`data:image/png;charset=utf-8;base64,${PNG_BASE64}`)?.mimeType).toBe("image/png");
-  });
-
-  it("REFUSES every scheme that is not a base64 image data URL", () => {
-    // The wall the whole file is built around: everything past this point turns
-    // the string into bytes inside the keeper's own world directory.
-    expect(parseImageDataUrl("javascript:alert(1)")).toBeNull();
-    expect(parseImageDataUrl("https://masteroftales.com/tokens/bugbear.png")).toBeNull();
-    expect(parseImageDataUrl("worlds/barovia/tokens/ireena.png")).toBeNull();
-    expect(parseImageDataUrl(`data:text/html;base64,${PNG_BASE64}`)).toBeNull();
-    expect(parseImageDataUrl(`data:application/octet-stream;base64,${PNG_BASE64}`)).toBeNull();
-    expect(parseImageDataUrl("data:image/png,%89PNG")).toBeNull();
-    expect(parseImageDataUrl("data:image/png;base64")).toBeNull();
-  });
-
-  it("refuses a payload that is not base64 at all", () => {
-    expect(parseImageDataUrl("data:image/png;base64,not base64!!")).toBeNull();
-    expect(parseImageDataUrl("data:image/png;base64,abcde")).toBeNull();
-    expect(parseImageDataUrl("data:image/png;base64,")).toBeNull();
-  });
-
-  it("tolerates the line breaks a wrapped base64 payload arrives with", () => {
-    const wrapped = `data:image/png;base64,${PNG_BASE64.slice(0, 4)}\n  ${PNG_BASE64.slice(4)}`;
-    expect(parseImageDataUrl(wrapped)?.base64).toBe(PNG_BASE64);
-  });
-
-  it("refuses anything that is not a string, and anything past the cap", () => {
-    expect(parseImageDataUrl(null)).toBeNull();
-    expect(parseImageDataUrl({ dataUrl: PNG_DATA_URL })).toBeNull();
-    expect(parseImageDataUrl(`data:image/png;base64,${"A".repeat(MAX_DATA_URL_LENGTH)}`)).toBeNull();
-  });
-});
-
-// --------------------------------------------------------------- the filename
-
-describe("safeFileName", () => {
-  it("keeps an ordinary basename", () => {
-    expect(safeFileName("bugbear.png", "image/png")).toBe("bugbear.png");
-  });
-
-  it("STRIPS directory components — a filename off a wire may not name a path", () => {
-    expect(safeFileName("../../worlds/barovia/bugbear.png", "image/png")).toBe("bugbear.png");
-    expect(safeFileName("C:\\Users\\gm\\bugbear.png", "image/png")).toBe("bugbear.png");
-    expect(safeFileName("..", "image/png")).toBe("token.png");
-    expect(safeFileName("/etc/passwd", "image/png")).toBe("passwd.png");
-  });
-
-  it("takes the extension from the bytes rather than the suggestion", () => {
-    // A PNG named .jpg is a file that lies to every tool that later opens it.
-    expect(safeFileName("bugbear.jpg", "image/png")).toBe("bugbear.png");
-    expect(safeFileName("bugbear", "image/jpeg")).toBe("bugbear.jpg");
-    expect(safeFileName("bugbear.png", "image/webp")).toBe("bugbear.webp");
-  });
-
-  it("reduces anything outside [A-Za-z0-9._-] to a dash", () => {
-    expect(safeFileName("Ash Hollow Bugbear!.png", "image/png")).toBe("Ash-Hollow-Bugbear.png");
-    expect(safeFileName("bug/bear;rm -rf.png", "image/png")).toBe("bear-rm-rf.png");
-  });
-
-  it("never starts with a dot and never sanitises away to nothing", () => {
-    expect(safeFileName(".htaccess", "image/png")).toBe("htaccess.png");
-    expect(safeFileName("...", "image/png")).toBe("token.png");
-    expect(safeFileName("", "image/png")).toBe("token.png");
-    expect(safeFileName(null, "image/png")).toBe("token.png");
-    expect(safeFileName("!!!", "image/png")).toBe("token.png");
-  });
-
-  it("caps the stem", () => {
-    expect(safeFileName(`${"b".repeat(400)}.png`, "image/png")).toBe(`${"b".repeat(60)}.png`);
-  });
-
-  it("keeps an inner dot, which is a legal part of a name", () => {
-    expect(safeFileName("ash.hollow.bugbear.png", "image/png")).toBe("ash.hollow.bugbear.png");
-  });
-});
-
-describe("extensionFor", () => {
-  it("spells the well-travelled types", () => {
-    expect(extensionFor("image/jpeg")).toBe("jpg");
-    expect(extensionFor("IMAGE/PNG")).toBe("png");
-    expect(extensionFor("image/svg+xml")).toBe("svg");
-  });
-
-  it("derives an extension for a type it has never heard of", () => {
-    expect(extensionFor("image/x-tga")).toBe("xtga");
-    expect(extensionFor("image/")).toBe("png");
-  });
-});
-
-describe("uniqueFileName", () => {
-  it("keeps the name when nothing has it", () => {
-    expect(uniqueFileName("bugbear.png", [])).toBe("bugbear.png");
-    expect(uniqueFileName("bugbear.png", ["masteroftales-tokens/goblin.png"])).toBe("bugbear.png");
-  });
-
-  it("NEVER overwrites — Foundry's own upload would, silently", () => {
-    const taken = ["masteroftales-tokens/bugbear.png"];
-    expect(uniqueFileName("bugbear.png", taken)).toBe("bugbear-1.png");
-    expect(uniqueFileName("bugbear.png", [...taken, "masteroftales-tokens/bugbear-1.png"])).toBe("bugbear-2.png");
-  });
-
-  it("compares case-insensitively, because some filesystems do", () => {
-    expect(uniqueFileName("bugbear.png", ["masteroftales-tokens/BugBear.PNG"])).toBe("bugbear-1.png");
-  });
-
-  it("ignores anything in the listing that is not a path", () => {
-    expect(uniqueFileName("bugbear.png", [null, 7, ""] as unknown as string[])).toBe("bugbear.png");
-  });
-});
-
 // ------------------------------------------------------------- the actor type
 
 describe("actorTypeNames / defaultActorType", () => {
@@ -288,37 +122,14 @@ describe("actorCreateData", () => {
       type: "npc",
       img: "masteroftales-tokens/bugbear.png",
       prototypeToken: { texture: { src: "masteroftales-tokens/bugbear.png" } },
-      flags: { [MODULE_ID]: { origin: "mot" } },
     });
   });
 
   it("writes neither field with no picture, so Foundry's own placeholder stands", () => {
     const data = actorCreateData("Bugbear", "npc", null);
-    expect(data).toEqual({ name: "Bugbear", type: "npc", flags: { [MODULE_ID]: { origin: "mot" } } });
+    expect(data).toEqual({ name: "Bugbear", type: "npc" });
     expect("img" in data).toBe(false);
     expect("prototypeToken" in data).toBe(false);
-  });
-});
-
-// ------------------------------------------------------------ resolving foundry
-
-describe("resolveFilePicker", () => {
-  const picker = Object.assign(function FilePicker() {}, { upload: () => undefined });
-  const legacy = Object.assign(function FilePicker() {}, { upload: () => undefined });
-
-  it("prefers the v13 namespace over the deprecated bare global", () => {
-    const scope = { foundry: { applications: { apps: { FilePicker: picker } } }, FilePicker: legacy };
-    expect(resolveFilePicker(scope)).toBe(picker);
-  });
-
-  it("falls back to the bare global", () => {
-    expect(resolveFilePicker({ FilePicker: legacy })).toBe(legacy);
-  });
-
-  it("answers null for a client that has neither, or one with no upload on it", () => {
-    expect(resolveFilePicker({})).toBeNull();
-    expect(resolveFilePicker(null)).toBeNull();
-    expect(resolveFilePicker({ FilePicker: function FilePicker() {} })).toBeNull();
   });
 });
 
@@ -335,171 +146,6 @@ describe("resolveActorApi", () => {
     expect(resolveActorApi({ Actor: legacy })?.Actor).toBe(legacy);
     expect(resolveActorApi({ Actor: function Actor() {} })).toBeNull();
     expect(resolveActorApi(undefined)).toBeNull();
-  });
-});
-
-// --------------------------------------------------------------- the bytes
-
-describe("decodeBase64 / buildTokenFile", () => {
-  it("decodes to the bytes that went in", () => {
-    expect([...(decodeBase64(PNG_BASE64) ?? [])]).toEqual([...PNG_BYTES]);
-  });
-
-  it("answers null rather than throwing for a payload atob refuses", () => {
-    expect(decodeBase64("@@@ not base64 @@@")).toBeNull();
-  });
-
-  it("answers null on a client with no atob", () => {
-    expect(decodeBase64(PNG_BASE64, {})).toBeNull();
-  });
-
-  it("builds a File carrying the name and the content type", async () => {
-    const file = buildTokenFile(image()) as File;
-    expect(file).toBeInstanceOf(File);
-    expect(file.name).toBe("bugbear.png");
-    expect(file.type).toBe("image/png");
-    expect([...new Uint8Array(await file.arrayBuffer())]).toEqual([...PNG_BYTES]);
-  });
-
-  it("answers null on a client with no File constructor", () => {
-    expect(buildTokenFile(image(), {})).toBeNull();
-  });
-});
-
-// -------------------------------------------------------------- the upload
-
-interface PickerOptions {
-  /** The directory listing, or null for a `browse` that throws (no such folder). */
-  files?: string[] | null;
-  createDirectoryRejects?: unknown;
-  uploadRejects?: boolean;
-  uploadResult?: unknown;
-  omitBrowse?: boolean;
-}
-
-interface PickerTable {
-  api: FilePickerApi;
-  uploads: Array<{ source: string; path: string; file: File; options: unknown }>;
-  created: string[];
-  browsed: number;
-}
-
-/**
- * A FilePicker with no Foundry behind it. Small on purpose — the moment a stub is
- * complicated enough to have bugs, the tests it supports stop being evidence.
- */
-function fakePicker(options: PickerOptions = {}): PickerTable {
-  const table: PickerTable = { api: {} as FilePickerApi, uploads: [], created: [], browsed: 0 };
-  let files = options.files === undefined ? [] : options.files;
-
-  const api: FilePickerApi = {
-    upload: (source, path, file, _body, uploadOptions) => {
-      if (options.uploadRejects) return Promise.reject(new Error("the data directory is read-only"));
-      table.uploads.push({ source, path, file: file as File, options: uploadOptions });
-      if (options.uploadResult !== undefined) return Promise.resolve(options.uploadResult);
-      return Promise.resolve({ status: "success", path: `${path}/${(file as File).name}` });
-    },
-    createDirectory: (_source, target) => {
-      if (options.createDirectoryRejects) return Promise.reject(options.createDirectoryRejects);
-      table.created.push(target);
-      files = files ?? [];
-      return Promise.resolve({ path: target });
-    },
-  };
-
-  if (!options.omitBrowse) {
-    api.browse = (_source, target) => {
-      table.browsed += 1;
-      if (files === null) return Promise.reject(new Error(`ENOENT: no such directory ${target}`));
-      return Promise.resolve({ target, dirs: [], files });
-    };
-  }
-
-  table.api = api;
-  return table;
-}
-
-describe("prepareTokenDirectory", () => {
-  it("lists what is already there", async () => {
-    const picker = fakePicker({ files: ["masteroftales-tokens/goblin.png"] });
-    await expect(prepareTokenDirectory(picker.api)).resolves.toEqual(["masteroftales-tokens/goblin.png"]);
-    expect(picker.created).toEqual([]);
-  });
-
-  it("creates the directory when it is not there yet, then lists it", async () => {
-    const picker = fakePicker({ files: null });
-    await expect(prepareTokenDirectory(picker.api)).resolves.toEqual([]);
-    expect(picker.created).toEqual([TOKEN_DIRECTORY]);
-  });
-
-  it("TOLERATES a directory that already exists — another client may have just made it", async () => {
-    const log = createLog();
-    const picker = fakePicker({ files: null, createDirectoryRejects: new Error("EEXIST: file already exists") });
-    await expect(prepareTokenDirectory(picker.api, log)).resolves.toEqual([]);
-    expect(log.lines.warn).toEqual([]);
-  });
-
-  it("shrugs at a Foundry with no browse at all", async () => {
-    const picker = fakePicker({ omitBrowse: true });
-    await expect(prepareTokenDirectory(picker.api)).resolves.toEqual([]);
-  });
-});
-
-describe("uploadedPath", () => {
-  it("reads Foundry's own success answer", () => {
-    expect(uploadedPath({ status: "success", path: "masteroftales-tokens/bugbear.png" }, "fallback")).toBe(
-      "masteroftales-tokens/bugbear.png",
-    );
-  });
-
-  it("reads `false` as the failure it is — Foundry returns it rather than throwing", () => {
-    expect(uploadedPath(false, "fallback")).toBeNull();
-    expect(uploadedPath(null, "fallback")).toBeNull();
-    expect(uploadedPath(undefined, "fallback")).toBeNull();
-    expect(uploadedPath({ status: "error", message: "no" }, "fallback")).toBeNull();
-  });
-
-  it("falls back to the composed path for an answer it does not recognise", () => {
-    expect(uploadedPath({ status: "success" }, "fallback")).toBe("fallback");
-    expect(uploadedPath(true, "fallback")).toBe("fallback");
-  });
-});
-
-describe("uploadTokenImage", () => {
-  it("uploads into the module's own directory, with Foundry's own toast suppressed", async () => {
-    const picker = fakePicker();
-    const path = await uploadTokenImage(picker.api, image());
-
-    expect(path).toBe("masteroftales-tokens/bugbear.png");
-    expect(picker.uploads).toHaveLength(1);
-    expect(picker.uploads[0]?.source).toBe(DATA_SOURCE);
-    expect(picker.uploads[0]?.path).toBe(TOKEN_DIRECTORY);
-    expect(picker.uploads[0]?.file.name).toBe("bugbear.png");
-    // This module reports its own failures, in its own voice, once.
-    expect(picker.uploads[0]?.options).toEqual({ notify: false });
-  });
-
-  it("uniques the name rather than replacing a picture already there", async () => {
-    const picker = fakePicker({ files: ["masteroftales-tokens/bugbear.png"] });
-    const path = await uploadTokenImage(picker.api, image());
-
-    expect(path).toBe("masteroftales-tokens/bugbear-1.png");
-    expect(picker.uploads[0]?.file.name).toBe("bugbear-1.png");
-  });
-
-  it("answers null when Foundry refuses the upload, by throwing or by saying false", async () => {
-    const log = createLog();
-    await expect(uploadTokenImage(fakePicker({ uploadRejects: true }).api, image(), log)).resolves.toBeNull();
-    await expect(uploadTokenImage(fakePicker({ uploadResult: false }).api, image())).resolves.toBeNull();
-    expect(log.lines.warn).toHaveLength(1);
-  });
-
-  it("answers null without uploading when the bytes will not decode", async () => {
-    const picker = fakePicker();
-    const log = createLog();
-    await expect(uploadTokenImage(picker.api, image({ base64: "not base64" }), log)).resolves.toBeNull();
-    expect(picker.uploads).toEqual([]);
-    expect(log.lines.warn).toHaveLength(1);
   });
 });
 
@@ -564,7 +210,6 @@ describe("createActorCreateHandler", () => {
         type: "npc",
         img: "masteroftales-tokens/ash-hollow-bugbear.png",
         prototypeToken: { texture: { src: "masteroftales-tokens/ash-hollow-bugbear.png" } },
-        flags: { [MODULE_ID]: { origin: "mot" } },
       },
     ]);
     // The key back verbatim, Foundry's id, Foundry's name — and nothing else.
@@ -591,7 +236,7 @@ describe("createActorCreateHandler", () => {
     expect(test.picker.uploads).toEqual([]);
     expect(test.picker.browsed).toBe(0);
     expect(test.created).toEqual([
-      { name: "Ash-Hollow Bugbear", type: "npc", flags: { [MODULE_ID]: { origin: "mot" } } },
+      { name: "Ash-Hollow Bugbear", type: "npc" },
     ]);
     expect(test.reported).toHaveLength(1);
     expect(test.notices).toEqual([]);
