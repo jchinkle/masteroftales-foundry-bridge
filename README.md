@@ -170,6 +170,19 @@ connects *in* to your Foundry, and no port needs opening):
   decision rather than a trap. A row Master of Tales never linked to a Foundry actor — or
   one pointing at an actor this world no longer has — appears in the tray greyed, with a
   line saying why, rather than quietly going missing.
+- **New creatures** — a creature you invented in Master of Tales can be sent straight into
+  this world as a real Foundry actor, token art and all. The picture travels as **bytes,
+  once**, and is written into your own Foundry's data folder — a directory called
+  `masteroftales-tokens`, made on first use — rather than linked back to Master of Tales.
+  That is the whole point of doing it the slow way: from the moment it lands it is an
+  ordinary Foundry actor wearing an ordinary local picture, and it keeps working with Master
+  of Tales shut, your internet down, or your subscription cancelled. A picture whose name is
+  already taken is saved under a new one; nothing in that folder is ever overwritten, and no
+  file outside it is ever written at all. The actor is created as your system's `npc` type
+  where it has one, and its portrait and its prototype token both point at the new file.
+  Foundry's own id and name for it travel back so Master of Tales can point its page at
+  *your* actor — and that is the entirety of what goes back. If any step fails, nothing is
+  reported and Foundry says why on your screen.
 
 Dice and announcements are created by the **active GM's client only**, so the table sees
 one message rather than one per open browser, and both carry a flag that stops this module
@@ -192,14 +205,23 @@ Encounters need less again. The tray is a window on the GM's own screen, and not
 it reaches a player until a token is on the map — at which point it is an ordinary Foundry
 token, and combat, initiative and the tracker are Foundry's from there on.
 
+Creating a creature is the one command that writes a **file**, and it is worth being exact
+about which one: a single image, under `masteroftales-tokens/` in your world's data, named
+after the creature, created by the GM's client through Foundry's own upload. Nothing is read
+back out of that folder except the list of names already in it, which is how a second
+bugbear avoids overwriting the first. No other file, anywhere on your machine, is written or
+read.
+
 Anything else MoT may send is ignored quietly: a server that has shipped a feature your
 module has not costs you the feature, never the connection.
 
 Nothing else is read or sent. The module reads documents **only as they change**, through
 the hooks listed above, and it never sends anything anywhere except the server URL you
 configured. It walks your world in exactly one place — the actor list described above, which
-is ids, names, portrait paths and types, and never a sheet. Your compendia and files are not
-read at all, and your journals are read only far enough to find the handout entries this
+is ids, names, portrait paths and types, and never a sheet. Your compendia are not read at
+all, and the only files it touches are the token pictures it writes for creatures you asked
+it to create — one directory, described above, never read back and never sent anywhere.
+Your journals are read only far enough to find the handout entries this
 module wrote before, by a flag it stamped on them — their contents are never sent anywhere.
 A portrait travels as a **link back to your own Foundry** — its address and route prefix in
 front of the path Foundry stores — rather than as a picture. The file stays on your machine

@@ -155,18 +155,47 @@ describe("createDispatcher", () => {
     expect(onActorsRequest).toHaveBeenCalledWith({});
   });
 
-  it("treats the two newest types as unknown when nothing is wired", () => {
+  it("routes actor.create to its handler", () => {
+    const onActorCreate = vi.fn();
+    const dispatch = createDispatcher({ onSession: vi.fn(), onActorCreate });
+
+    dispatch(envelope("actor.create", { key: "req-1", name: "Bugbear", image: null }));
+
+    expect(onActorCreate).toHaveBeenCalledWith({ key: "req-1", name: "Bugbear", image: null });
+  });
+
+  it("treats the three newest types as unknown when nothing is wired", () => {
     const log = createLog();
     const dispatch = createDispatcher({ onSession: vi.fn(), log });
 
     dispatch(envelope("encounter.deploy", { entries: [] }));
     dispatch(envelope("actors.request", {}));
+    dispatch(envelope("actor.create", { key: "req-1" }));
 
     expect(log.lines.debug).toEqual([
       '[masteroftales-bridge] no renderer wired for "encounter.deploy"',
       '[masteroftales-bridge] no renderer wired for "actors.request"',
+      '[masteroftales-bridge] no renderer wired for "actor.create"',
     ]);
     expect(log.lines.warn).toHaveLength(0);
+  });
+
+  it("IGNORES a command type it has never heard of — the 0.6.1-meets-actor.create case", () => {
+    // A module that predates a command has no entry for it in the routing table
+    // at all, so the type falls through to the unknown path rather than the
+    // nothing-wired one. Reproduced with a type *this* version has never heard of
+    // either: same branch, same silence, and the socket keeps delivering session
+    // state for the rest of the night afterwards.
+    const onSession = vi.fn();
+    const log = createLog();
+    const dispatch = createDispatcher({ onSession, log });
+
+    expect(() => dispatch(envelope("actor.create.v99", { key: "req-1" }))).not.toThrow();
+    dispatch(envelope("session.state", LIVE));
+
+    expect(log.lines.warn).toHaveLength(0);
+    expect(log.lines.debug).toEqual(['[masteroftales-bridge] ignoring unknown command type "actor.create.v99"']);
+    expect(onSession).toHaveBeenCalledTimes(1);
   });
 
   it("does not mistake a render command for session state", () => {

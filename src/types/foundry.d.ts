@@ -328,7 +328,23 @@ declare global {
     ready?: boolean;
     version?: string;
     world?: { id?: string; title?: string } | null;
-    system?: { id?: string; version?: string } | null;
+    system?: {
+      id?: string;
+      version?: string;
+      /**
+       * The system's own `documentTypes` block out of system.json — an object
+       * keyed by type name. The fallback for a client where `game.documentTypes`
+       * has not been assembled; `defaultActorType` in commands/actorCreate.ts
+       * accepts either spelling rather than asking which major it is running on.
+       */
+      documentTypes?: Record<string, unknown> | null;
+    } | null;
+    /**
+     * Every document family's type list as this world assembles it — the core
+     * types plus whatever a system or module added. `Actor` is a `string[]`, and
+     * it includes Foundry's own `"base"`, which is never a thing to create.
+     */
+    documentTypes?: Record<string, string[] | undefined> | null;
     user?: FoundryUser | null;
     users?: FoundryUsers | null;
     settings: FoundrySettings;

@@ -267,6 +267,42 @@ export function actorCatalogBody(actors: unknown, info: BridgeInfo, base: string
   return { bridge: info, actors: collectActorCatalog(actors, base) };
 }
 
+// -------------------------------------------------------- the other direction
+
+/**
+ * The `POST /api/v1/bridge/actor_creations` body: the answer to one
+ * `actor.create` (see commands/actorCreate.ts).
+ *
+ * Three fields, and the shape is the reason it is written as a value:
+ *
+ *  - `key` is the **opaque correlation string MoT minted**, echoed back exactly as
+ *    it arrived. This module never parses it and never invents one; a report
+ *    carrying a key MoT does not recognise is a report MoT drops, which is the
+ *    right end for a module that has misunderstood something.
+ *  - `actorId` and `name` are **Foundry's**, read off the document that now exists
+ *    in the world rather than off the payload that asked for it. That is the whole
+ *    reason the report exists: only this end knows what Foundry called it.
+ *
+ * And note what is absent, for the same reason the catalog says so out loud: **no
+ * user, member or role id rides here**, and no MoT record id either. The bridge
+ * wire does not carry them, in either direction, ever.
+ *
+ * Unlike the catalog this carries no `bridge` identity block. The report answers a
+ * request that came down a socket the server already knows the world of, and the
+ * bearer token names the project; an identity block here would be a second answer
+ * to a question nobody asked twice.
+ */
+export interface ActorCreationBody {
+  key: string;
+  actorId: string;
+  name: string;
+}
+
+/** The report body, as a value, so its shape is a unit test. */
+export function actorCreationBody(key: string, actorId: string, name: string): ActorCreationBody {
+  return { key, actorId, name };
+}
+
 function nonEmpty(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();

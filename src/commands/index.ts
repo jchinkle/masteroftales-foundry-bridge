@@ -5,11 +5,12 @@ import type { BridgeWelcomePayload, Envelope } from "../protocol/types.js";
 /**
  * The inbound command dispatcher.
  *
- * It understands eight types — `bridge.welcome` and `session.state`, which carry
+ * It understands nine types — `bridge.welcome` and `session.state`, which carry
  * session state, and `dice.show`, `chat.post`, `image.show`, `handout.show`,
- * `encounter.deploy` and `actors.request`, which are acted on by
+ * `encounter.deploy`, `actors.request` and `actor.create`, which are acted on by
  * `commands/dice.ts`, `commands/chat.ts`, `commands/images.ts`,
- * `commands/handouts.ts` and `commands/encounters.ts` (which owns the last two).
+ * `commands/handouts.ts`, `commands/encounters.ts` (which owns `encounter.deploy`
+ * and `actors.request`) and `commands/actorCreate.ts`.
  * Everything else is ignored, and that is the point. Rule 1 of the protocol: **an unknown
  * `type` is ignored, not errored.** A module a version ahead of the server (or
  * behind it) loses a feature; it does not lose the connection, and it does not
@@ -98,6 +99,14 @@ export interface CommandDeps {
    * See commands/encounters.ts and protocol/actors.ts.
    */
   onActorsRequest?(payload: unknown): void;
+  /**
+   * Handles `actor.create`. Optional, for the same reason again — and it is the
+   * one type that points **both** ways: a creature invented in Master of Tales is
+   * written into this world as an Actor, its picture is written into the world's
+   * own data directory, and the id Foundry gave it is POSTed home so MoT can
+   * point its own page at a real actor. See commands/actorCreate.ts.
+   */
+  onActorCreate?(payload: unknown): void;
   log?: CommandLog;
 }
 
@@ -112,7 +121,13 @@ const RENDERED = new Map<
   string,
   keyof Pick<
     CommandDeps,
-    "onDiceShow" | "onChatPost" | "onImageShow" | "onHandoutShow" | "onEncounterDeploy" | "onActorsRequest"
+    | "onDiceShow"
+    | "onChatPost"
+    | "onImageShow"
+    | "onHandoutShow"
+    | "onEncounterDeploy"
+    | "onActorsRequest"
+    | "onActorCreate"
   >
 >([
   ["dice.show", "onDiceShow"],
@@ -121,6 +136,7 @@ const RENDERED = new Map<
   ["handout.show", "onHandoutShow"],
   ["encounter.deploy", "onEncounterDeploy"],
   ["actors.request", "onActorsRequest"],
+  ["actor.create", "onActorCreate"],
 ]);
 
 /**

@@ -9,6 +9,7 @@ import type { DocumentContext } from "./capture/documents.js";
 import { registerItemCapture } from "./capture/items.js";
 import { PriorValues } from "./capture/priorValues.js";
 import { registerSceneCapture } from "./capture/scenes.js";
+import { createActorCreateHandler, resolveActorApi, resolveFilePicker } from "./commands/actorCreate.js";
 import { createChatPostHandler, resolveChatMessageClass } from "./commands/chat.js";
 import { createDiceShowHandler, resolveDiceApi } from "./commands/dice.js";
 import type { ActorLike, EncounterPlan, Placement, ResolvedEntry } from "./commands/encounters.js";
@@ -30,13 +31,14 @@ import {
 } from "./commands/images.js";
 import type { SessionSummary } from "./commands/index.js";
 import { createDispatcher, NO_SESSION } from "./commands/index.js";
-import type { ActorCatalogBody } from "./protocol/actors.js";
+import type { ActorCatalogBody, ActorCreationBody } from "./protocol/actors.js";
 import { resolveAssetBase } from "./protocol/actors.js";
 import { readRoster } from "./protocol/roster.js";
 import type { BridgeInfo, Envelope, EventBatch } from "./protocol/types.js";
 import { MODULE_ID, MODULE_VERSION } from "./protocol/version.js";
 import type { BridgeSettings } from "./settings.js";
 import {
+  ACTOR_CREATIONS_PATH,
   ACTORS_PATH,
   EVENTS_PATH,
   handoutPath,
@@ -226,6 +228,25 @@ class Bridge {
       // And its companion, which points the other way entirely: the answer is a
       // POST back to MoT rather than anything rendered here.
       onActorsRequest: () => this.announceActors(),
+      // Slice 7, and the only command that points *both* ways: a creature
+      // invented in MoT becomes a real Actor in this world — picture and all,
+      // written into the world's own data directory so it outlives the bridge —
+      // and the id Foundry gave it is POSTed home. Every Foundry class it needs
+      // is resolved per command rather than cached, like the rest.
+      onActorCreate: createActorCreateHandler({
+        isActive: () => this.isActive(),
+        files: () => resolveFilePicker(globalThis),
+        actors: () => resolveActorApi(globalThis),
+        // `game.documentTypes` is the world's own answer, which includes types a
+        // module added; the system's table is the fallback for a client where the
+        // former has not been built yet. See `defaultActorType`.
+        actorTypes: () => game.documentTypes?.Actor ?? game.system?.documentTypes?.Actor,
+        report: (body) => this.postActorCreation(body),
+        // The one command with a failure the keeper must see rather than read in
+        // a console: they are standing in MoT waiting for the creature.
+        notify,
+        log,
+      }),
     });
 
     this.socket = new BridgeSocket({
@@ -453,6 +474,32 @@ class Bridge {
 
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`Master of Tales refused the actor catalog (HTTP ${response.status})`);
+    }
+  }
+
+  /**
+   * The answer to one `actor.create`: the creature exists here now, and this is
+   * its Foundry id. Same token, same headers, same shape of failure as
+   * `postActors` — a non-2xx is thrown for the handler to turn into the one
+   * notification the keeper needs (the actor is real; only the answer went
+   * astray).
+   */
+  private async postActorCreation(body: ActorCreationBody): Promise<void> {
+    const check = checkServerUrl(this.settings.serverUrl);
+    if (!check.ok) throw new Error(check.reason ?? "Invalid server URL");
+
+    const response = await fetch(apiUrl(check.normalized ?? this.settings.serverUrl, ACTOR_CREATIONS_PATH), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.settings.apiToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Master of Tales refused the new actor's id (HTTP ${response.status})`);
     }
   }
 

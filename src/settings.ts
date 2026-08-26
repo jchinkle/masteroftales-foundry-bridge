@@ -59,6 +59,17 @@ export function handoutPath(nodeId: string): string {
  */
 export const ACTORS_PATH = "/api/v1/bridge/actors";
 
+/**
+ * The answer to one `actor.create`: the creature Master of Tales asked for now
+ * exists in this world, and this is the id Foundry gave it.
+ *
+ * A POST out rather than a reply down the socket, for the same reason the catalog
+ * is one: the bridge cable carries commands *in*, and an answer riding back up it
+ * would need a request/response protocol this module deliberately does not have.
+ * See commands/actorCreate.ts and protocol/actors.ts.
+ */
+export const ACTOR_CREATIONS_PATH = "/api/v1/bridge/actor_creations";
+
 export interface BridgeSettings {
   serverUrl: string;
   apiToken: string;
