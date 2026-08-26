@@ -70,6 +70,13 @@ first):
 - **Bridge identity** on each batch — your world id, Foundry version, game system and
   version, and this module's version. That is what lets the MoT panel say "last seen 3
   minutes ago, dnd5e 5.0.2".
+- **Your actor list**, when Master of Tales asks for it — and once when your world loads.
+  Each actor's id, name, portrait path and system type (`npc`, `character`…), capped at 500,
+  and nothing else: no sheet, no hit points, no inventory, no ownership. It exists so that
+  planning "three goblins and a bugbear" in Master of Tales can point at *your* goblins
+  rather than at a name typed from memory. This is the one thing the module reads that is
+  not a document changing during play; it is a directory listing, and it is sent only when
+  asked for and once at startup.
 - **Who is at the table**, alongside that identity — each Foundry user's id, display name,
   whether they are a GM, and whether their browser is connected right now. Nothing else
   about them: no email, no password, no character sheet, no permissions, no IP. It exists
@@ -148,6 +155,21 @@ connects *in* to your Foundry, and no port needs opening):
   so your players keep the letter between sessions and can reopen it from their sidebar
   whenever they like. Paper and ink do not travel with it: a Foundry journal wears
   Foundry's look, honestly, rather than a pastiche of MoT's.
+- **Encounters** — a fight you planned in Master of Tales, deployed a stage at a time.
+  Pressing **Deploy** on a stage opens a small **token tray** on your screen listing that
+  stage's monsters — three goblins, a bugbear — and you drag each one onto the map. *You*
+  place them, because where an ambush stands is the one part of an encounter that is
+  entirely about the picture on the screen, and each row drags exactly as a drag from your
+  own actor directory does, so prototype tokens, vision and your system's hooks all behave
+  as they always do. Once every token is down, the module makes sure a combat exists on
+  that scene, adds the new tokens to it, and asks **Foundry** to roll initiative for them.
+  It never invents an initiative number: your game system rolls it, the same way it does
+  for a token you drop by hand. Anyone already in the fight keeps the initiative they
+  rolled — deploying reinforcements in round three does not reshuffle your table. And you
+  are not obliged to finish: the roll button stays pressable, so four of six goblins is a
+  decision rather than a trap. A row Master of Tales never linked to a Foundry actor — or
+  one pointing at an actor this world no longer has — appears in the tray greyed, with a
+  line saying why, rather than quietly going missing.
 
 Dice and announcements are created by the **active GM's client only**, so the table sees
 one message rather than one per open browser, and both carry a flag that stops this module
@@ -166,15 +188,21 @@ document, so once the GM's client has written it Foundry copies it to the player
 shared with by itself. The GM's client is the only one that fetches anything, because it is
 the only one holding a token — see below.
 
+Encounters need less again. The tray is a window on the GM's own screen, and nothing about
+it reaches a player until a token is on the map — at which point it is an ordinary Foundry
+token, and combat, initiative and the tracker are Foundry's from there on.
+
 Anything else MoT may send is ignored quietly: a server that has shipped a feature your
 module has not costs you the feature, never the connection.
 
 Nothing else is read or sent. The module reads documents **only as they change**, through
-the hooks listed above — it never walks your world, and it never sends anything anywhere
-except the server URL you configured. Your compendia and files are not read at all, and
-your journals are read only far enough to find the handout entries this module wrote
-before, by a flag it stamped on them — their contents are never sent anywhere. Actors,
-tokens and scenes are read only at the moment one of them changes during play,
+the hooks listed above, and it never sends anything anywhere except the server URL you
+configured. It walks your world in exactly one place — the actor list described above, which
+is ids, names, portrait paths and types, and never a sheet. Your compendia and files are not
+read at all, and your journals are read only far enough to find the handout entries this
+module wrote before, by a flag it stamped on them — their contents are never sent anywhere.
+Beyond that listing, actors, tokens and scenes are read only at the moment one of them
+changes during play,
 and only for the handful of fields named above (name, image, hit points, conditions,
 disposition, coin). Character sheets are not uploaded, and neither is anything you have not
 touched.
@@ -204,6 +232,10 @@ typed it. If two people GM your world, each pastes the key on their own machine.
   cause one of them to be written into the journal of a Foundry connected with a key for the
   same project. Not the pages themselves — only what that project already lets its players
   read, and nothing at all from a page that has not been shared.
+- Ask that Foundry for its **actor list** — ids, names, portrait paths and system types, and
+  none of the sheets behind them — and open a **token tray** on the GM's screen with a list
+  of monsters in it. Nothing lands on a map unless the GM drags it there, and the only thing
+  that follows from a placement is Foundry's own initiative roll for the token just placed.
 
 And that is the list. An `mtb_` key cannot read your documents, cannot see your assets,
 cannot touch any other project, and does not identify you as a user anywhere. This is

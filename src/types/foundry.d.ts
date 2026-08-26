@@ -117,6 +117,8 @@ declare global {
   interface FoundryActor extends FoundryDocument {
     /** System-defined; capture only ever probes it by well-known path. */
     system?: Record<string, unknown> | null;
+    /** The system's own actor type — `"npc"`, `"character"`, `"vehicle"`… */
+    type?: string | null;
     /**
      * True when some non-GM user owns this actor — Foundry's own answer to "is
      * this one of the party's, or the GM's?".
@@ -144,6 +146,11 @@ declare global {
     actorLink?: boolean | null;
     /** The synthetic actor, already carrying the delta applied. */
     actor?: FoundryActor | null;
+    /**
+     * A TokenDocument's parent **is** its Scene, which is how `encounter.deploy`
+     * learns which map a freshly dropped token landed on.
+     */
+    parent?: FoundryScene | null;
     /** v11+: an unlinked token's overrides of its base actor. */
     delta?: Record<string, unknown> | null;
     /** v10 and earlier name for `delta`. Both are read; whichever is there wins. */
@@ -189,13 +196,34 @@ declare global {
     size?: number;
   }
 
+  /**
+   * A Combat. Read by capture/combat.ts and **written** by
+   * commands/encounters.ts, which is why the mutators are here — and why every
+   * one of them is optional and guarded at the call site: a combat that arrives
+   * as a plain source object has none of them.
+   */
   interface FoundryCombat extends FoundryDocument {
     round?: number | null;
     turn?: number | null;
     started?: boolean | null;
+    /** True on the one combat the tracker is showing. */
+    active?: boolean | null;
+    /** The scene this fight is filed under. A source object may carry the bare id. */
+    scene?: FoundryScene | string | null;
     /** Whose turn it is. Absent on some paths; `combatants.get(id)` is the fallback. */
     combatant?: FoundryCombatant | null;
     combatants?: FoundryCombatantCollection | FoundryCombatant[] | null;
+    createEmbeddedDocuments?(embeddedName: string, data: Record<string, unknown>[]): unknown;
+    /**
+     * Foundry's own initiative roll, for the named combatant ids. **This module
+     * never computes an initiative number** — see the header of
+     * commands/encounters.ts. It asks; the system answers.
+     */
+    rollInitiative?(ids: string[], options?: Record<string, unknown>): unknown;
+    /** Rolls for every combatant that has no initiative yet. The fallback path. */
+    rollAll?(options?: Record<string, unknown>): unknown;
+    /** Makes this the combat the tracker is showing. */
+    activate?(options?: Record<string, unknown>): unknown;
   }
 
   /** `combatTurnChange`'s prior/current markers. */
@@ -258,6 +286,11 @@ declare global {
     size?: number;
   }
 
+  /** `game.scenes`, whose one extra member is the map everyone is looking at. */
+  interface FoundryScenes extends FoundryWorldCollection<FoundryScene> {
+    active?: FoundryScene | null;
+  }
+
   // -------------------------------------------------------------------- game
 
   interface FoundrySettings {
@@ -307,6 +340,12 @@ declare global {
     journal?: FoundryWorldCollection<FoundryJournalEntry> | null;
     /** Every Folder, of every type. Filtered to `"JournalEntry"` before use. */
     folders?: FoundryWorldCollection<FoundryFolder> | null;
+    /** Every Actor in the world. `encounter.deploy`'s lookup, and the catalog's source. */
+    actors?: FoundryWorldCollection<FoundryActor> | null;
+    /** Every Combat. `encounter.deploy` adopts the active scene's, or makes one. */
+    combats?: FoundryWorldCollection<FoundryCombat> | null;
+    /** Every Scene, plus `active` — the map a deployed token lands on. */
+    scenes?: FoundryScenes | null;
   }
 
   interface FoundryNotifications {

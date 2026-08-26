@@ -17,7 +17,7 @@ export const MODULE_ID = "masteroftales-bridge";
  * somehow isn't in the registry, and it is kept in step with module.json and
  * package.json by the release workflow.
  */
-export const MODULE_VERSION = "0.5.0";
+export const MODULE_VERSION = "0.6.0";
 
 /** Prefix on every idempotency key this module mints. */
 export const KEY_PREFIX = "fvtt";

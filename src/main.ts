@@ -11,6 +11,13 @@ import { PriorValues } from "./capture/priorValues.js";
 import { registerSceneCapture } from "./capture/scenes.js";
 import { createChatPostHandler, resolveChatMessageClass } from "./commands/chat.js";
 import { createDiceShowHandler, resolveDiceApi } from "./commands/dice.js";
+import type { ActorLike, EncounterPlan, Placement, ResolvedEntry } from "./commands/encounters.js";
+import {
+  createActorsRequestHandler,
+  createEncounterDeployHandler,
+  deployInitiative,
+  resolveCombatApi,
+} from "./commands/encounters.js";
 import type { HandoutResponse } from "./commands/handouts.js";
 import { createHandoutShowHandler, resolveJournalApi } from "./commands/handouts.js";
 import type { ImagePlan, ImageShowSocketEvent } from "./commands/images.js";
@@ -23,11 +30,13 @@ import {
 } from "./commands/images.js";
 import type { SessionSummary } from "./commands/index.js";
 import { createDispatcher, NO_SESSION } from "./commands/index.js";
+import type { ActorCatalogBody } from "./protocol/actors.js";
 import { readRoster } from "./protocol/roster.js";
 import type { BridgeInfo, Envelope, EventBatch } from "./protocol/types.js";
 import { MODULE_ID, MODULE_VERSION } from "./protocol/version.js";
 import type { BridgeSettings } from "./settings.js";
 import {
+  ACTORS_PATH,
   EVENTS_PATH,
   handoutPath,
   isConfigured,
@@ -41,6 +50,7 @@ import { Heartbeat } from "./transport/heartbeat.js";
 import type { SocketLike } from "./transport/socket.js";
 import { BridgeSocket } from "./transport/socket.js";
 import { apiUrl, cableUrl, checkServerUrl } from "./transport/urls.js";
+import { EncounterTray } from "./ui/encounterTray.js";
 import { StatusChip } from "./ui/status.js";
 
 /**
@@ -110,6 +120,13 @@ class Bridge {
   private readonly dispatch: (envelope: Envelope) => void;
 
   /**
+   * Sends this world's actor catalog. Held as a field rather than left inside the
+   * dispatcher because it is called from two places: on `actors.request`, and
+   * once at activation — see `start()`.
+   */
+  private readonly announceActors: () => void;
+
+  /**
    * The hit points and coin this client last saw, because Foundry's update
    * hooks report the new value and the diff but never the old one. Bounded —
    * see capture/priorValues.ts.
@@ -132,6 +149,18 @@ class Bridge {
     this.settings = readSettings();
 
     this.chip = new StatusChip({ onClick: () => void this.runTest() });
+
+    // Gated on `isConfigured` as well as the activation gate, unlike every other
+    // command: this one is the only path that starts a request *we* chose to
+    // make, so a world with no token pasted into it should stay silent rather
+    // than posting a catalog at the default server to be told no.
+    this.announceActors = createActorsRequestHandler({
+      isActive: () => this.isActive() && isConfigured(this.settings),
+      actors: () => game.actors,
+      bridgeInfo,
+      post: (body) => this.postActors(body),
+      log,
+    });
 
     this.dispatch = createDispatcher({
       log,
@@ -178,6 +207,19 @@ class Bridge {
         world: () => ({ entries: () => game.journal, folders: () => game.folders }),
         log,
       }),
+      // Slice 6's pair. `encounter.deploy` is the least Foundry-touching command
+      // in the whole table at the moment it arrives: it opens a window on this
+      // one screen and then waits for a human. Everything that reaches the table
+      // happens later, as the GM drags — see `openEncounterTray` below.
+      onEncounterDeploy: createEncounterDeployHandler({
+        isActive: () => this.isActive(),
+        lookupActor: (actorId) => (game.actors?.get?.(actorId) as ActorLike | undefined) ?? null,
+        openTray: (plan, entries) => openEncounterTray(plan, entries),
+        log,
+      }),
+      // And its companion, which points the other way entirely: the answer is a
+      // POST back to MoT rather than anything rendered here.
+      onActorsRequest: () => this.announceActors(),
     });
 
     this.socket = new BridgeSocket({
@@ -300,6 +342,12 @@ class Bridge {
 
     this.chip.render();
     this.reconfigure();
+
+    // The catalog, once, now that the world is up and this client is the one
+    // answering for it. MoT can ask again whenever it likes (`actors.request`),
+    // but a keeper who opens the encounter planner the moment their Foundry
+    // finishes loading should find a pick-list already there.
+    this.announceActors();
   }
 
   /** Re-read settings and reconnect. Called on every settings change. */
@@ -378,6 +426,31 @@ class Bridge {
   }
 
   /**
+   * This world's actor catalog. The only POST in this file that is not a record
+   * of the night, and the only one whose success is a `204` with nothing in it —
+   * so, unlike `postBatch`, there is no body to read and a non-2xx is simply
+   * thrown for `createActorsRequestHandler` to log.
+   */
+  private async postActors(body: ActorCatalogBody): Promise<void> {
+    const check = checkServerUrl(this.settings.serverUrl);
+    if (!check.ok) throw new Error(check.reason ?? "Invalid server URL");
+
+    const response = await fetch(apiUrl(check.normalized ?? this.settings.serverUrl, ACTORS_PATH), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.settings.apiToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Master of Tales refused the actor catalog (HTTP ${response.status})`);
+    }
+  }
+
+  /**
    * The one gate, shared by every capture and by both render commands.
    *
    * Re-evaluated per event rather than once at `ready`: `activeGM` moves when a
@@ -428,6 +501,66 @@ function renderLocally(plan: ImagePlan): void {
     return;
   }
   if (!renderImagePopout(plan, api)) log.debug("could not open an image popout", plan);
+}
+
+// ------------------------------------------------------ the encounter path
+//
+// The other place in this file where a command does not finish when it returns —
+// though for a different reason than the image path's. There the work has to
+// finish on other people's machines; here it finishes when a human has dragged
+// six goblins onto a map, which may be thirty seconds later or never.
+
+/**
+ * The one open tray, or null.
+ *
+ * **One at a time, and the old one is closed rather than left up.** Two trays
+ * means two `createToken` listeners, and a token dropped for stage three would be
+ * counted by stage two as well — which would put it in the tracker twice and roll
+ * for it twice. Closing is also what takes the old hook off; see
+ * ui/encounterTray.ts.
+ */
+let encounterTray: EncounterTray | null = null;
+
+function openEncounterTray(plan: EncounterPlan, entries: ResolvedEntry[]): void {
+  encounterTray?.close();
+
+  const tray = new EncounterTray({
+    plan,
+    entries,
+    hooks: Hooks,
+    rollInitiative: (placements) => void rollEncounterInitiative(placements),
+    log,
+  });
+
+  encounterTray = tray;
+  tray.open();
+}
+
+/**
+ * Adds what the GM just placed to the scene's combat and asks Foundry to roll.
+ *
+ * Everything with a decision in it is in `deployInitiative`; this is the wiring
+ * plus the one failure the customer can do something about (a Foundry with no
+ * Combat class reachable, which means a client that is not finished booting).
+ */
+async function rollEncounterInitiative(placements: Placement[]): Promise<void> {
+  const api = resolveCombatApi(globalThis);
+  if (!api) {
+    log.warn("no Foundry Combat class available; the tokens are placed but no initiative was rolled");
+    return;
+  }
+
+  try {
+    const outcome = await deployInitiative(
+      api,
+      { combats: () => game.combats, activeScene: () => game.scenes?.active ?? null },
+      placements,
+      log,
+    );
+    log.debug(`encounter deployed: ${outcome.added} combatants added, ${outcome.rolled} rolled`);
+  } catch (error) {
+    log.warn("could not roll initiative for the deployed tokens", error);
+  }
 }
 
 /**

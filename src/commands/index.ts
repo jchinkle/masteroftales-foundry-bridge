@@ -5,10 +5,11 @@ import type { BridgeWelcomePayload, Envelope } from "../protocol/types.js";
 /**
  * The inbound command dispatcher.
  *
- * It understands six types — `bridge.welcome` and `session.state`, which carry
- * session state, and `dice.show`, `chat.post`, `image.show` and `handout.show`,
- * which are acted on by `commands/dice.ts`, `commands/chat.ts`,
- * `commands/images.ts` and `commands/handouts.ts`.
+ * It understands eight types — `bridge.welcome` and `session.state`, which carry
+ * session state, and `dice.show`, `chat.post`, `image.show`, `handout.show`,
+ * `encounter.deploy` and `actors.request`, which are acted on by
+ * `commands/dice.ts`, `commands/chat.ts`, `commands/images.ts`,
+ * `commands/handouts.ts` and `commands/encounters.ts` (which owns the last two).
  * Everything else is ignored, and that is the point. Rule 1 of the protocol: **an unknown
  * `type` is ignored, not errored.** A module a version ahead of the server (or
  * behind it) loses a feature; it does not lose the connection, and it does not
@@ -82,6 +83,21 @@ export interface CommandDeps {
    * commands/handouts.ts.
    */
   onHandoutShow?(payload: unknown): void;
+  /**
+   * Handles `encounter.deploy`. Optional, for the same reason again — and this
+   * one renders least of all: it opens a tray on the GM's own screen and then
+   * waits for a human to drag things out of it. Nothing reaches the table until
+   * the GM puts it there. See commands/encounters.ts.
+   */
+  onEncounterDeploy?(payload: unknown): void;
+  /**
+   * Handles `actors.request`. Optional, for the same reason again — and the odd
+   * one out of the whole table: it is the only inbound type whose answer travels
+   * *back* to Master of Tales rather than into Foundry. MoT is asking this world
+   * for its actor catalog so an encounter planner in the browser has a pick-list.
+   * See commands/encounters.ts and protocol/actors.ts.
+   */
+  onActorsRequest?(payload: unknown): void;
   log?: CommandLog;
 }
 
@@ -94,12 +110,17 @@ export interface CommandDeps {
  */
 const RENDERED = new Map<
   string,
-  keyof Pick<CommandDeps, "onDiceShow" | "onChatPost" | "onImageShow" | "onHandoutShow">
+  keyof Pick<
+    CommandDeps,
+    "onDiceShow" | "onChatPost" | "onImageShow" | "onHandoutShow" | "onEncounterDeploy" | "onActorsRequest"
+  >
 >([
   ["dice.show", "onDiceShow"],
   ["chat.post", "onChatPost"],
   ["image.show", "onImageShow"],
   ["handout.show", "onHandoutShow"],
+  ["encounter.deploy", "onEncounterDeploy"],
+  ["actors.request", "onActorsRequest"],
 ]);
 
 /**

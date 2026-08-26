@@ -1,35 +1,64 @@
 /**
- * A hand-rolled DOM, just large enough for `StatusChip`.
+ * A hand-rolled DOM, just large enough for `StatusChip` and `EncounterTray`.
  *
  * Written rather than pulled in (happy-dom/jsdom) to keep the dev toolchain at
  * typescript + vite + vitest, which is the same reason the ActionCable client is
- * hand-written. It implements only the handful of methods the chip calls, and if
- * the chip ever calls something else the test fails loudly rather than silently
- * passing against a permissive mock.
+ * hand-written. It implements only the handful of methods those two call, and if
+ * either ever calls something else the test fails loudly rather than silently
+ * passing against a permissive mock — which is also why the properties below are
+ * declared rather than left to be created by whatever assigns them.
  */
 
 export class FakeElement {
   readonly children: FakeElement[] = [];
-  readonly listeners = new Map<string, Array<() => void>>();
+  readonly listeners = new Map<string, Array<(event?: unknown) => void>>();
   readonly classList: { add(name: string): void; contains(name: string): boolean };
   readonly style: Record<string, string> = {};
 
   id = "";
   title = "";
   textContent = "";
-  className = "";
   parent: FakeElement | null = null;
   isConnected = false;
 
+  // The handful of element properties the tray sets directly. Declared so that a
+  // typo in production code is a type error rather than a property nobody reads.
+  src = "";
+  alt = "";
+  type = "";
+  draggable = false;
+  disabled = false;
+
   private readonly classes = new Set<string>();
   private readonly attributes = new Map<string, string>();
+  private classNames = "";
+
+  /**
+   * Kept in step with `classList`, because the real one is: an element built with
+   * `className = "row is-unavailable"` is findable by `.is-unavailable`, and a
+   * fake where it was not would let a selector test pass for the wrong reason.
+   */
+  get className(): string {
+    return this.classNames;
+  }
+
+  set className(value: string) {
+    this.classNames = value;
+    this.classes.clear();
+    for (const name of value.split(/\s+/)) {
+      if (name !== "") this.classes.add(name);
+    }
+  }
 
   constructor(
     readonly tagName: string,
     readonly ownerDocument: FakeDocument,
   ) {
     this.classList = {
-      add: (name) => void this.classes.add(name),
+      add: (name) => {
+        this.classes.add(name);
+        this.classNames = [...this.classes].join(" ");
+      },
       contains: (name) => this.classes.has(name),
     };
   }
@@ -68,15 +97,20 @@ export class FakeElement {
     this.isConnected = false;
   }
 
-  addEventListener(type: string, handler: () => void): void {
+  addEventListener(type: string, handler: (event?: unknown) => void): void {
     const list = this.listeners.get(type) ?? [];
     list.push(handler);
     this.listeners.set(type, list);
   }
 
+  /** Test driver: fire every handler for `type`, with an event object if given. */
+  dispatch(type: string, event?: unknown): void {
+    for (const handler of this.listeners.get(type) ?? []) handler(event);
+  }
+
   /** Test driver. */
   click(): void {
-    for (const handler of this.listeners.get("click") ?? []) handler();
+    this.dispatch("click");
   }
 
   querySelector(selector: string): FakeElement | null {

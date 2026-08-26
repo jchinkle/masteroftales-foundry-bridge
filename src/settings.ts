@@ -49,6 +49,16 @@ export function handoutPath(nodeId: string): string {
   return `/api/v1/bridge/handouts/${encodeURIComponent(nodeId)}`;
 }
 
+/**
+ * This world's actor catalog. The one endpoint the module **pushes a list** to
+ * rather than a record — see protocol/actors.ts for why it is a POST out instead
+ * of a GET in (nothing ever connects *into* a customer's Foundry), and why it is
+ * not simply hung off `BridgeInfo` like the roster is.
+ *
+ * Answers `204 No Content`: there is nothing to say back about a pick-list.
+ */
+export const ACTORS_PATH = "/api/v1/bridge/actors";
+
 export interface BridgeSettings {
   serverUrl: string;
   apiToken: string;

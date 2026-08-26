@@ -248,32 +248,48 @@ export function createGame(options: StubGameOptions = {}): StubGame {
 export interface StubHooks {
   on(hook: string, fn: (...args: any[]) => unknown): number;
   once(hook: string, fn: (...args: any[]) => unknown): number;
-  off(hook: string, id: number): void;
+  off(hook: string, id: number | ((...args: any[]) => unknown)): void;
   /** Test-only: fire every handler registered for `hook`. */
   emit(hook: string, ...args: unknown[]): void;
   handlers: Map<string, Array<(...args: any[]) => unknown>>;
 }
 
+/**
+ * Foundry's hook registry.
+ *
+ * `off` really removes, by id or by function, because one feature turns on it:
+ * the encounter tray unregisters its `createToken` listener when it closes, and a
+ * stub that quietly kept calling the handler would let the leak this module is
+ * built to avoid pass its own test.
+ */
 export function createHooks(): StubHooks {
   const handlers = new Map<string, Array<(...args: any[]) => unknown>>();
+  const byId = new Map<number, { hook: string; fn: (...args: any[]) => unknown }>();
   let seq = 1;
 
   const add = (hook: string, fn: (...args: any[]) => unknown): number => {
     const list = handlers.get(hook) ?? [];
     list.push(fn);
     handlers.set(hook, list);
-    return seq++;
+    const id = seq++;
+    byId.set(id, { hook, fn });
+    return id;
   };
 
   return {
     handlers,
     on: add,
     once: add,
-    off() {
-      /* not needed by any test yet */
+    off(hook, id) {
+      const fn = typeof id === "number" ? byId.get(id)?.fn : id;
+      if (!fn) return;
+      const list = handlers.get(hook) ?? [];
+      const at = list.indexOf(fn);
+      if (at >= 0) list.splice(at, 1);
+      if (typeof id === "number") byId.delete(id);
     },
     emit(hook, ...args) {
-      for (const fn of handlers.get(hook) ?? []) fn(...args);
+      for (const fn of [...(handlers.get(hook) ?? [])]) fn(...args);
     },
   };
 }
@@ -718,6 +734,9 @@ export interface StubTokenOptions extends StubDocumentOptions {
   texture?: { src?: string | null } | null;
   img?: string | null;
   actor?: FoundryActor | null;
+  actorId?: string | null;
+  /** A TokenDocument's parent is its Scene — how a placement learns which map. */
+  parent?: FoundryScene | null;
   /** v11+ unlinked override. */
   delta?: Record<string, unknown> | null;
   /** v10 spelling of the same thing. */
@@ -736,6 +755,8 @@ export function tokenDocument(options: StubTokenOptions = {}): FoundryTokenDocum
     texture: options.texture === undefined ? null : options.texture,
     img: options.img === undefined ? null : options.img,
     actor: options.actor === undefined ? null : options.actor,
+    actorId: options.actorId === undefined ? null : options.actorId,
+    parent: options.parent === undefined ? null : options.parent,
     delta: options.delta === undefined ? null : options.delta,
     actorData: options.actorData === undefined ? null : options.actorData,
   };
@@ -1090,6 +1111,186 @@ export function createJournal(options: FakeJournalOptions = {}): FakeJournal {
       Folder,
       CONST,
       ...(options.converter === false ? {} : { MarkdownJournalPageSheet: markdownSheet }),
+    },
+  };
+}
+
+// ----------------------------------------------------------------- combats
+//
+// `encounter.deploy`'s stubs. Two behaviours a naive fake would get wrong, and
+// both are things the production code is required to cope with: a **combatant
+// that already has an initiative** must survive a deploy untouched (the party
+// rolled at the top of the fight; reinforcements must not reshuffle them), and a
+// `Combat` on a plain-source-object path has **none of the mutators** — so which
+// methods exist is an option here rather than an assumption.
+
+export interface FakeCombatantOptions {
+  id?: string;
+  tokenId?: string | null;
+  /** A number means this one has already rolled. */
+  initiative?: number | null;
+}
+
+export class FakeCombatant {
+  readonly id: string;
+  readonly tokenId: string | null;
+  initiative: number | null;
+
+  constructor(options: FakeCombatantOptions = {}) {
+    this.id = options.id ?? `combatant${(combatantSequence += 1)}`;
+    this.tokenId = options.tokenId === undefined ? null : options.tokenId;
+    this.initiative = options.initiative === undefined ? null : options.initiative;
+  }
+}
+
+let combatantSequence = 0;
+
+/** Which of Foundry's roll methods this Combat carries. */
+export type FakeCombatRolls = "initiative" | "all" | "none";
+
+export interface FakeCombatOptions {
+  /** The scene id this fight is filed under. */
+  scene?: string | null;
+  active?: boolean;
+  combatants?: FakeCombatant[];
+  rolls?: FakeCombatRolls;
+  /** Model a Combat with no embedded-document API at all. */
+  noCreate?: boolean;
+}
+
+export class FakeCombat {
+  readonly combatants: FakeCollection<FakeCombatant>;
+  readonly scene: string | null;
+  active: boolean;
+
+  /** Every `createEmbeddedDocuments("Combatant", …)` argument, in order. */
+  readonly added: Record<string, unknown>[][] = [];
+  /** Every `rollInitiative` id list, in order. */
+  readonly rolled: string[][] = [];
+  rollAllCalls = 0;
+  activations = 0;
+
+  createEmbeddedDocuments?: (embeddedName: string, data: Record<string, unknown>[]) => Promise<unknown>;
+  rollInitiative?: (ids: string[]) => Promise<unknown>;
+  rollAll?: () => Promise<unknown>;
+
+  constructor(
+    readonly id: string,
+    options: FakeCombatOptions = {},
+  ) {
+    this.scene = options.scene === undefined ? null : options.scene;
+    this.active = options.active === true;
+    this.combatants = new FakeCollection(options.combatants ?? []);
+
+    if (!options.noCreate) {
+      this.createEmbeddedDocuments = (embeddedName, data) => {
+        if (embeddedName !== "Combatant") throw new Error(`no such embedded document: ${embeddedName}`);
+        this.added.push(data);
+        // Foundry mints the combatants; so does this, so that the initiative
+        // targets read back off a collection rather than off the argument.
+        for (const row of data) {
+          this.combatants.push(
+            new FakeCombatant({ tokenId: typeof row.tokenId === "string" ? row.tokenId : null }),
+          );
+        }
+        return Promise.resolve([...this.combatants.contents]);
+      };
+    }
+
+    if ((options.rolls ?? "initiative") === "initiative") {
+      this.rollInitiative = (ids) => {
+        this.rolled.push([...ids]);
+        // A rolled combatant has an initiative afterwards, which is what makes a
+        // second press a no-op for the ones already in the fight.
+        for (const id of ids) {
+          const combatant = this.combatants.get(id);
+          if (combatant) combatant.initiative = 12;
+        }
+        return Promise.resolve(this);
+      };
+    } else if (options.rolls === "all") {
+      this.rollAll = () => {
+        this.rollAllCalls += 1;
+        return Promise.resolve(this);
+      };
+    }
+  }
+
+  activate(): Promise<unknown> {
+    this.activations += 1;
+    this.active = true;
+    return Promise.resolve(this);
+  }
+}
+
+export interface FakeCombatsOptions {
+  /** Combats already in the world. */
+  combats?: FakeCombat[];
+  /** The active scene's id, or null for a client with no scene up. */
+  sceneId?: string | null;
+  /** Make `Combat.create` resolve to null, the way a refused create does. */
+  createReturnsNull?: boolean;
+  /** Which roll methods a *created* combat carries. */
+  rolls?: FakeCombatRolls;
+}
+
+export interface FakeCombats {
+  /** A v13/v14 scope: the class lives at `foundry.documents.Combat`. */
+  v13Scope: Record<string, unknown>;
+  /** A v12-era scope: the bare global only. */
+  legacyScope: Record<string, unknown>;
+  /** `game.combats` and `game.scenes.active`, as the deploy path reads them. */
+  world: { combats(): unknown; activeScene(): { id?: string | null } | null };
+  combats: FakeCollection<FakeCombat>;
+  /** Every `Combat.create` argument, in order. */
+  created: Record<string, unknown>[];
+  /** Anything that reached the deprecated bare global on the v13 scope. Must stay empty. */
+  decoyed: string[];
+  readonly last: FakeCombat | undefined;
+}
+
+export function createCombats(options: FakeCombatsOptions = {}): FakeCombats {
+  const combats = new FakeCollection<FakeCombat>(options.combats ?? []);
+  const created: Record<string, unknown>[] = [];
+  const decoyed: string[] = [];
+  const sceneId = options.sceneId === undefined ? "scene1" : options.sceneId;
+
+  let sequence = 0;
+
+  function Combat(): void {
+    /* never constructed; documents are made through `create` */
+  }
+  Combat.create = (data: Record<string, unknown>): Promise<unknown> => {
+    created.push(data);
+    if (options.createReturnsNull) return Promise.resolve(null);
+    const combat = new FakeCombat(`combat${(sequence += 1)}`, {
+      scene: typeof data.scene === "string" ? data.scene : null,
+      rolls: options.rolls,
+    });
+    combats.push(combat);
+    return Promise.resolve(combat);
+  };
+
+  function Decoy(): void {
+    /* the deprecated v13 alias; resolution must never reach it */
+  }
+  Decoy.create = (): Promise<unknown> => {
+    decoyed.push("Combat");
+    return Promise.resolve(null);
+  };
+
+  return {
+    combats,
+    created,
+    decoyed,
+    world: {
+      combats: () => combats,
+      activeScene: () => (sceneId === null ? null : { id: sceneId }),
+    },
+    v13Scope: { foundry: { documents: { Combat } }, Combat: Decoy },
+    legacyScope: { Combat },
+    get last() {
+      return combats.contents[combats.contents.length - 1];
     },
   };
 }

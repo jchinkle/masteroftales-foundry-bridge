@@ -141,6 +141,34 @@ describe("createDispatcher", () => {
     expect(onChatPost).toHaveBeenCalledWith({ text: "The gate grinds open." });
   });
 
+  it("routes encounter.deploy and actors.request to their handlers", () => {
+    const onEncounterDeploy = vi.fn();
+    const onActorsRequest = vi.fn();
+    const dispatch = createDispatcher({ onSession: vi.fn(), onEncounterDeploy, onActorsRequest });
+
+    dispatch(envelope("encounter.deploy", { stageName: "Stage 2", entries: [{ actorId: "a1" }] }));
+    dispatch(envelope("actors.request", {}));
+
+    expect(onEncounterDeploy).toHaveBeenCalledWith({ stageName: "Stage 2", entries: [{ actorId: "a1" }] });
+    // Handed the payload like every other type, and ignored by the handler on the
+    // other side — see commands/encounters.ts. The dispatcher plays no favourites.
+    expect(onActorsRequest).toHaveBeenCalledWith({});
+  });
+
+  it("treats the two newest types as unknown when nothing is wired", () => {
+    const log = createLog();
+    const dispatch = createDispatcher({ onSession: vi.fn(), log });
+
+    dispatch(envelope("encounter.deploy", { entries: [] }));
+    dispatch(envelope("actors.request", {}));
+
+    expect(log.lines.debug).toEqual([
+      '[masteroftales-bridge] no renderer wired for "encounter.deploy"',
+      '[masteroftales-bridge] no renderer wired for "actors.request"',
+    ]);
+    expect(log.lines.warn).toHaveLength(0);
+  });
+
   it("does not mistake a render command for session state", () => {
     const onSession = vi.fn();
     const dispatch = createDispatcher({ onSession, onDiceShow: vi.fn(), onChatPost: vi.fn() });
