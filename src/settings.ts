@@ -70,6 +70,16 @@ export const ACTORS_PATH = "/api/v1/bridge/actors";
  */
 export const ACTOR_CREATIONS_PATH = "/api/v1/bridge/actor_creations";
 
+/**
+ * The answer to one `actor.sheet.request`: one creature's system data, on its
+ * way to a statblock a keeper is filling in over in Master of Tales.
+ *
+ * A POST out for {@link ACTOR_CREATIONS_PATH}'s reason, and the third door in
+ * this module that closes a loop MoT opened. See commands/actorSheet.ts and
+ * protocol/actorSheet.ts.
+ */
+export const ACTOR_SHEETS_PATH = "/api/v1/bridge/actor_sheets";
+
 export interface BridgeSettings {
   serverUrl: string;
   apiToken: string;

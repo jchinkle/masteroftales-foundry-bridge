@@ -77,6 +77,14 @@ first):
   rather than at a name typed from memory. This is the one thing the module reads that is
   not a document changing during play; it is a directory listing, and it is sent only when
   asked for and once at startup.
+- **One creature's sheet**, when you ask for it from a statblock in Master of Tales, and
+  never otherwise. Picking an actor in that dialog sends *that one actor's* system data
+  along with its weapons, features and spells — the numbers a statblock is made of. It is
+  the one thing here that is neither a document changing during play nor sent on a timer:
+  it happens because you pressed **Import from Foundry** on a page, once, for the creature
+  you named. The actor list above does not change, no other actor is read, and if a single
+  creature somehow runs past a quarter of a megabyte its longest descriptions are trimmed
+  and the import says so.
 - **Who is at the table**, alongside that identity — each Foundry user's id, display name,
   whether they are a GM, and whether their browser is connected right now. Nothing else
   about them: no email, no password, no character sheet, no permissions, no IP. It exists
@@ -235,7 +243,9 @@ module has not costs you the feature, never the connection.
 Nothing else is read or sent. The module reads documents **only as they change**, through
 the hooks listed above, and it never sends anything anywhere except the server URL you
 configured. It walks your world in exactly one place — the actor list described above, which
-is ids, names, portrait paths and types, and never a sheet. Your compendia are not read at
+is ids, names, portrait paths and types, and never a sheet. One actor's sheet travels only
+when you press **Import from Foundry** on a statblock in Master of Tales, for the creature
+you picked in that dialog and no other. Your compendia are not read at
 all, and the only files it touches are the token pictures it writes for creatures you asked
 it to create or to place — one directory, described above, never read back and never sent
 anywhere.
@@ -277,8 +287,9 @@ typed it. If two people GM your world, each pastes the key on their own machine.
   same project. Not the pages themselves — only what that project already lets its players
   read, and nothing at all from a page that has not been shared.
 - Ask that Foundry for its **actor list** — ids, names, portrait paths and system types, and
-  none of the sheets behind them — and open a **token tray** on the GM's screen with a list
-  of monsters in it. Nothing lands on a map from the tray unless the GM drags it there, and
+  none of the sheets behind them — or for **one named actor's sheet**, which is the system
+  data behind a creature in that world's directory and nothing outside it. And open a
+  **token tray** on the GM's screen with a list of monsters in it. Nothing lands on a map from the tray unless the GM drags it there, and
   the only thing that follows from a placement is Foundry's own initiative roll for the token
   just placed.
 - Create an actor in that world, and **put one token on the scene the GM is looking at** —

@@ -12,6 +12,7 @@ import { registerSceneCapture } from "./capture/scenes.js";
 import { createActorCreateHandler, resolveActorApi } from "./commands/actorCreate.js";
 import type { PlaceableActor } from "./commands/actorPlace.js";
 import { createActorPlaceHandler, resolveCanvas } from "./commands/actorPlace.js";
+import { createActorSheetHandler } from "./commands/actorSheet.js";
 import { createChatPostHandler, resolveChatMessageClass } from "./commands/chat.js";
 import { createDiceShowHandler, resolveDiceApi } from "./commands/dice.js";
 import type { ActorLike, EncounterPlan, Placement, ResolvedEntry } from "./commands/encounters.js";
@@ -34,6 +35,7 @@ import {
 import type { SessionSummary } from "./commands/index.js";
 import { createDispatcher, NO_SESSION } from "./commands/index.js";
 import { resolveFilePicker } from "./commands/tokenImages.js";
+import type { ActorSheetBody, ActorSheetFailure } from "./protocol/actorSheet.js";
 import type { ActorCatalogBody, ActorCreationBody } from "./protocol/actors.js";
 import { resolveAssetBase } from "./protocol/actors.js";
 import { readRoster } from "./protocol/roster.js";
@@ -42,6 +44,7 @@ import { MODULE_ID, MODULE_VERSION } from "./protocol/version.js";
 import type { BridgeSettings } from "./settings.js";
 import {
   ACTOR_CREATIONS_PATH,
+  ACTOR_SHEETS_PATH,
   ACTORS_PATH,
   EVENTS_PATH,
   handoutPath,
@@ -260,6 +263,23 @@ class Bridge {
         lookupActor: (actorId) => (game.actors?.get?.(actorId) as PlaceableActor | undefined) ?? null,
         canvas: () => resolveCanvas(globalThis),
         files: () => resolveFilePicker(globalThis),
+        notify,
+        log,
+      }),
+      // #81 stage 2, and the third command that points home rather than into
+      // Foundry: MoT names one actor, this world answers with its sheet, and a
+      // keeper's statblock fills itself in. Nothing is interpreted here — the
+      // adapter is asked only which item types are worth the bytes, and what an
+      // armour class *is* stays in MoT's game-system registry. Every global is
+      // read per command like the rest.
+      onActorSheetRequest: createActorSheetHandler({
+        isActive: () => this.isActive(),
+        lookupActor: (actorId) => game.actors?.get?.(actorId) ?? null,
+        systemId: () => game.system?.id ?? "unknown",
+        itemTypes: () => selectAdapter(game.system?.id).sheetItemTypes(),
+        report: (body) => this.postActorSheet(body),
+        // The keeper is standing in MoT with a dialog spinning; a sheet that
+        // could not be read has to say so on the screen they are looking at.
         notify,
         log,
       }),
@@ -516,6 +536,34 @@ class Bridge {
 
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`Master of Tales refused the new actor's id (HTTP ${response.status})`);
+    }
+  }
+
+  /**
+   * One creature's sheet, on its way to a statblock in Master of Tales (#81) —
+   * or the refusal that goes in its place when this world could not answer.
+   *
+   * The largest body this module ever posts — a quarter of a megabyte at the
+   * cap — and otherwise identical to its two neighbours: same token, same
+   * headers, and a non-2xx thrown for `createActorSheetHandler` to turn into
+   * the one notification the keeper needs.
+   */
+  private async postActorSheet(body: ActorSheetBody | ActorSheetFailure): Promise<void> {
+    const check = checkServerUrl(this.settings.serverUrl);
+    if (!check.ok) throw new Error(check.reason ?? "Invalid server URL");
+
+    const response = await fetch(apiUrl(check.normalized ?? this.settings.serverUrl, ACTOR_SHEETS_PATH), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.settings.apiToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Master of Tales refused the actor sheet (HTTP ${response.status})`);
     }
   }
 

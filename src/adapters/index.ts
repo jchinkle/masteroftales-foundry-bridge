@@ -76,6 +76,24 @@ export interface SystemAdapter {
    * which is the design working, not the design leaking.
    */
   currency(source: SystemDataSource, context: AdapterContext): CurrencyDetection | undefined;
+  /**
+   * Which of an actor's item types belong on a **statblock**, for
+   * `actor.sheet.request` (protocol/actorSheet.ts).
+   *
+   * The second place an adapter contributes something other than `ext`, and the
+   * boundary holds the way `currency` above holds it: the adapter answers one
+   * narrow question — "which of this system's item types could possibly be a
+   * trait or an action?" — while the wire shape, the caps, the trimming order
+   * and the decision to send at all stay in the protocol module, identical for
+   * every system. Nothing here *interprets* an item; this only says which ones
+   * are worth the bytes.
+   *
+   * `null` means "keep everything", which is what {@link genericAdapter}
+   * answers: a system this module has never met has item types nobody here can
+   * shortlist, and sending the lot is honest where guessing would not be. The
+   * count and byte caps still apply either way.
+   */
+  sheetItemTypes(): readonly string[] | null;
 }
 
 const ADAPTERS: SystemAdapter[] = [dnd5eAdapter];

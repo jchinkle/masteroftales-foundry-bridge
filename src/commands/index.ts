@@ -5,12 +5,13 @@ import type { BridgeWelcomePayload, Envelope } from "../protocol/types.js";
 /**
  * The inbound command dispatcher.
  *
- * It understands ten types — `bridge.welcome` and `session.state`, which carry
+ * It understands eleven types — `bridge.welcome` and `session.state`, which carry
  * session state, and `dice.show`, `chat.post`, `image.show`, `handout.show`,
- * `encounter.deploy`, `actors.request`, `actor.create` and `actor.place`, which
- * are acted on by `commands/dice.ts`, `commands/chat.ts`, `commands/images.ts`,
- * `commands/handouts.ts`, `commands/encounters.ts` (which owns `encounter.deploy`
- * and `actors.request`), `commands/actorCreate.ts` and `commands/actorPlace.ts`.
+ * `encounter.deploy`, `actors.request`, `actor.create`, `actor.place` and
+ * `actor.sheet.request`, which are acted on by `commands/dice.ts`,
+ * `commands/chat.ts`, `commands/images.ts`, `commands/handouts.ts`,
+ * `commands/encounters.ts` (which owns `encounter.deploy` and `actors.request`),
+ * `commands/actorCreate.ts`, `commands/actorPlace.ts` and `commands/actorSheet.ts`.
  * Everything else is ignored, and that is the point. Rule 1 of the protocol: **an unknown
  * `type` is ignored, not errored.** A module a version ahead of the server (or
  * behind it) loses a feature; it does not lose the connection, and it does not
@@ -114,6 +115,15 @@ export interface CommandDeps {
    * initiative, no answer back to MoT. See commands/actorPlace.ts.
    */
   onActorPlace?(payload: unknown): void;
+  /**
+   * Handles `actor.sheet.request`. Optional, for the same reason again — and it
+   * is `actors.request`'s little brother: the answer travels *back* to Master of
+   * Tales rather than into Foundry. Where that one is a doorbell for the whole
+   * catalog, this names one actor and carries a correlation id, because a keeper
+   * is standing in MoT with a statblock open waiting for that creature's sheet.
+   * See commands/actorSheet.ts and protocol/actorSheet.ts.
+   */
+  onActorSheetRequest?(payload: unknown): void;
   log?: CommandLog;
 }
 
@@ -136,6 +146,7 @@ const RENDERED = new Map<
     | "onActorsRequest"
     | "onActorCreate"
     | "onActorPlace"
+    | "onActorSheetRequest"
   >
 >([
   ["dice.show", "onDiceShow"],
@@ -146,6 +157,7 @@ const RENDERED = new Map<
   ["actors.request", "onActorsRequest"],
   ["actor.create", "onActorCreate"],
   ["actor.place", "onActorPlace"],
+  ["actor.sheet.request", "onActorSheetRequest"],
 ]);
 
 /**

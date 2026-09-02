@@ -33,4 +33,16 @@ export const genericAdapter: SystemAdapter = {
   currency() {
     return undefined;
   },
+
+  /**
+   * Null rather than an empty list, and the difference is this file's whole
+   * argument said once more: "we do not know which of this system's item types
+   * are traits and actions" is a different sentence from "this system has
+   * none". An empty list would send a homebrew creature's sheet with its
+   * feature list stripped out of it; null sends the lot and lets Master of
+   * Tales find nothing it can map, which is the honest failure.
+   */
+  sheetItemTypes() {
+    return null;
+  },
 };

@@ -95,7 +95,35 @@ export const dnd5eAdapter: SystemAdapter = {
 
     return { current, changed };
   },
+
+  /**
+   * The two dnd5e item types a statblock can be built out of.
+   *
+   * `weapon` is every attack a creature makes and `feat` is every trait and
+   * every feature-shaped action — which, between them, is every line under the
+   * rule on a printed block. What is deliberately left out is everything a
+   * *character sheet* has and a *statblock* does not: equipment, consumables,
+   * loot, tools, containers, backgrounds, classes, subclasses and species. A
+   * wizard's pack of rations is fifty items of nothing.
+   *
+   * `spell` is left out too, and that one is a decision rather than an
+   * oversight. A creature's spellcasting is *one* line on a statblock — the
+   * Spellcasting feature, which is a `feat` and does travel — and its list is
+   * written inside that feature's own description. Sending two hundred spell
+   * documents would bury a goblin's two actions to reproduce a paragraph that
+   * is already coming.
+   *
+   * This is the one thing in this file that is not `ext`, and it is a shortlist
+   * rather than an interpretation — see the interface's note on where the
+   * boundary sits.
+   */
+  sheetItemTypes() {
+    return SHEET_ITEM_TYPES;
+  },
 };
+
+/** Frozen so a caller cannot quietly widen the shortlist for everybody. */
+const SHEET_ITEM_TYPES: readonly string[] = Object.freeze(["weapon", "feat"]);
 
 function base(context: AdapterContext): Record<string, unknown> {
   return { system: context.systemId, systemVersion: context.systemVersion };

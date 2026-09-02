@@ -393,6 +393,7 @@ export function nullAdapter(): SystemAdapter {
     chatExt: () => undefined,
     actorExt: () => undefined,
     currency: () => undefined,
+    sheetItemTypes: () => null,
   };
 }
 
