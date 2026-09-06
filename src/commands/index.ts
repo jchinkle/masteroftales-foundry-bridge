@@ -5,11 +5,12 @@ import type { BridgeWelcomePayload, Envelope } from "../protocol/types.js";
 /**
  * The inbound command dispatcher.
  *
- * It understands eleven types — `bridge.welcome` and `session.state`, which carry
+ * It understands twelve types, `bridge.welcome` and `session.state`, which carry
  * session state, and `dice.show`, `chat.post`, `image.show`, `handout.show`,
- * `encounter.deploy`, `actors.request`, `actor.create`, `actor.place` and
- * `actor.sheet.request`, which are acted on by `commands/dice.ts`,
- * `commands/chat.ts`, `commands/images.ts`, `commands/handouts.ts`,
+ * `scene.upsert`, `encounter.deploy`, `actors.request`, `actor.create`,
+ * `actor.place` and `actor.sheet.request`, which are acted on by
+ * `commands/dice.ts`, `commands/chat.ts`, `commands/images.ts`,
+ * `commands/handouts.ts`, `commands/scenes.ts`,
  * `commands/encounters.ts` (which owns `encounter.deploy` and `actors.request`),
  * `commands/actorCreate.ts`, `commands/actorPlace.ts` and `commands/actorSheet.ts`.
  * Everything else is ignored, and that is the point. Rule 1 of the protocol: **an unknown
@@ -86,6 +87,17 @@ export interface CommandDeps {
    */
   onHandoutShow?(payload: unknown): void;
   /**
+   * Handles `scene.upsert`. Optional, for the same reason again, and it is the
+   * command that writes the most: the map a keeper is looking at in Master of
+   * Tales becomes a Scene in this world, background copied into the world's own
+   * data directory, grid laid over it, pins as Notes and the map's own lettering
+   * and lines as drawings. Like `handout.show` it runs on this one client, and
+   * for the same reason: the background is fetched over the bridge token, which
+   * lives in the keeper's browser alone. It activates nothing. See
+   * commands/scenes.ts.
+   */
+  onSceneUpsert?(payload: unknown): void;
+  /**
    * Handles `encounter.deploy`. Optional, for the same reason again — and this
    * one renders least of all: it opens a tray on the GM's own screen and then
    * waits for a human to drag things out of it. Nothing reaches the table until
@@ -142,6 +154,7 @@ const RENDERED = new Map<
     | "onChatPost"
     | "onImageShow"
     | "onHandoutShow"
+    | "onSceneUpsert"
     | "onEncounterDeploy"
     | "onActorsRequest"
     | "onActorCreate"
@@ -153,6 +166,7 @@ const RENDERED = new Map<
   ["chat.post", "onChatPost"],
   ["image.show", "onImageShow"],
   ["handout.show", "onHandoutShow"],
+  ["scene.upsert", "onSceneUpsert"],
   ["encounter.deploy", "onEncounterDeploy"],
   ["actors.request", "onActorsRequest"],
   ["actor.create", "onActorCreate"],

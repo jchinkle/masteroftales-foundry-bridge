@@ -34,6 +34,8 @@ import {
 } from "./commands/images.js";
 import type { SessionSummary } from "./commands/index.js";
 import { createDispatcher, NO_SESSION } from "./commands/index.js";
+import type { SceneBackgroundResponse } from "./commands/scenes.js";
+import { createSceneUpsertHandler, resolveSceneApi } from "./commands/scenes.js";
 import { resolveFilePicker } from "./commands/tokenImages.js";
 import type { ActorSheetBody, ActorSheetFailure } from "./protocol/actorSheet.js";
 import type { ActorCatalogBody, ActorCreationBody } from "./protocol/actors.js";
@@ -51,6 +53,7 @@ import {
   isConfigured,
   readSettings,
   registerSettings,
+  sceneBackgroundPath,
   testConnection,
 } from "./settings.js";
 import type { PostResult } from "./transport/outbox.js";
@@ -219,6 +222,29 @@ class Bridge {
         fetch: (nodeId) => this.fetchHandout(nodeId),
         api: () => resolveJournalApi(globalThis),
         world: () => ({ entries: () => game.journal, folders: () => game.folders }),
+        log,
+      }),
+      // #101, and the command that writes the most: a map from Master of Tales
+      // becomes the scene this table plays on. One client again, and for
+      // `handout.show`'s reason twice over, the background is fetched over the
+      // bridge token, which lives in this browser alone, and then *copied* into
+      // this world's data directory so the map outlives the bridge. Foundry
+      // replicates the Scene, the Notes and the journal entries behind them for
+      // free. Nothing is activated: that gesture stays the GM's.
+      onSceneUpsert: createSceneUpsertHandler({
+        isActive: () => this.isActive(),
+        fetchBackground: (mapId) => this.fetchSceneBackground(mapId),
+        api: () => resolveSceneApi(globalThis),
+        files: () => resolveFilePicker(globalThis),
+        world: () => ({
+          scenes: () => game.scenes,
+          entries: () => game.journal,
+          folders: () => game.folders,
+        }),
+        // The keeper pressed a button in another program and is waiting for a
+        // map. Whether one was *made* or *refreshed* is a fact only this side
+        // knows, nothing acks an outbound command, so it is said here.
+        notify,
         log,
       }),
       // Slice 6's pair. `encounter.deploy` is the least Foundry-touching command
@@ -486,6 +512,49 @@ class Bridge {
     }
 
     return { status: response.status, body };
+  }
+
+  /**
+   * One map's background picture, as bytes.
+   *
+   * The only fetch in this file that reads a *body* rather than a document, and
+   * the only one whose answer is not JSON. It reports what happened rather than
+   * throwing, exactly like `fetchHandout`, except where the network itself
+   * refused, which `commands/scenes.ts` catches and turns into a sentence on
+   * the keeper's screen.
+   */
+  private async fetchSceneBackground(mapId: string): Promise<SceneBackgroundResponse> {
+    const check = checkServerUrl(this.settings.serverUrl);
+    if (!check.ok) throw new Error(check.reason ?? "Invalid server URL");
+
+    const response = await fetch(
+      apiUrl(check.normalized ?? this.settings.serverUrl, sceneBackgroundPath(mapId)),
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${this.settings.apiToken}`,
+          Accept: "image/*",
+        },
+      },
+    );
+
+    if (response.status !== 200) return { status: response.status, bytes: null, contentType: null };
+
+    let bytes: Uint8Array | null = null;
+    try {
+      bytes = new Uint8Array(await response.arrayBuffer());
+    } catch {
+      // A body that ended mid-flight. Reported as a status this side can act on
+      // rather than thrown into a socket handler.
+    }
+
+    return {
+      status: response.status,
+      bytes,
+      // Split on `;` because a served picture may carry a charset it does not
+      // need, and the extension comes from the type alone.
+      contentType: (response.headers.get("Content-Type") ?? "").split(";")[0]?.trim() || null,
+    };
   }
 
   /**

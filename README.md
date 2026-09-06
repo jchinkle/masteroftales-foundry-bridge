@@ -163,6 +163,21 @@ connects *in* to your Foundry, and no port needs opening):
   so your players keep the letter between sessions and can reopen it from their sidebar
   whenever they like. Paper and ink do not travel with it: a Foundry journal wears
   Foundry's look, honestly, rather than a pastiche of MoT's.
+- **Maps as scenes**: a map you drew or uploaded in Master of Tales can be sent over as a
+  **Foundry scene**, ready to play on. The background picture travels as bytes, once, and is
+  written into your own world's data folder, a directory called `masteroftales-scenes`,
+  made on first use, so the map keeps working with Master of Tales shut. If the map records
+  the square it was drawn on, the scene arrives with a matching square grid, five feet to
+  the square, and the picture nudged so your drawn lines sit under Foundry's. If it does not,
+  the scene is gridless, which is the honest answer for a hand-drawn continent. Pins become
+  **notes** with a journal entry behind each, keeping the pin's own words and the name of the
+  page it opens; a pin the keeper marked for their eyes only arrives as a note **only the GM
+  can see**. The map's lettering and its roads and rivers arrive as drawings. Sending the
+  same map again **updates the same scene in place**: replacing only the notes and drawings
+  this module wrote, and leaving every wall, light, token and note you added exactly where
+  they are. Foundry has no dashed lines on a drawing, so a dashed border arrives solid.
+  **Nothing is activated**: the scene appears in your sidebar and waits for you to switch to
+  it when the party is ready.
 - **Encounters** — a fight you planned in Master of Tales, deployed a stage at a time.
   Pressing **Deploy** on a stage opens a small **token tray** on your screen listing that
   stage's monsters — three goblins, a bugbear — and you drag each one onto the map. *You*
@@ -230,12 +245,15 @@ open on the GM's screen, and Foundry replicates it to the table exactly as it do
 dropped by hand.
 
 Carrying a picture is the only thing that writes a **file**, and it is worth being exact
-about which one: a single image, under `masteroftales-tokens/` in your world's data, named
-after the creature, created by the GM's client through Foundry's own upload. Two commands do
-it — creating a creature and placing a token wearing art you picked — and they write into
-that same one directory and nowhere else. Nothing is read back out of it except the list of
-names already in it, which is how a second bugbear avoids overwriting the first. No other
-file, anywhere on your machine, is written or read.
+about where: two directories in your world's data, and nowhere else. `masteroftales-tokens/`
+holds token art, one image per creature, named after the creature, two commands write there,
+creating a creature and placing a token wearing art you picked. Nothing is read back out of
+it except the list of names already in it, which is how a second bugbear avoids overwriting
+the first. `masteroftales-scenes/` holds map backgrounds, one image per map, named after the
+map's own id, and that one **is** overwritten each time you send the same map, on purpose:
+one map is one picture, and a growing pile of near-identical backgrounds would be litter
+rather than history. Every file is created by the GM's client through Foundry's own upload.
+No other file, anywhere on your machine, is written or read.
 
 Anything else MoT may send is ignored quietly: a server that has shipped a feature your
 module has not costs you the feature, never the connection.
@@ -249,8 +267,10 @@ you picked in that dialog and no other. Your compendia are not read at
 all, and the only files it touches are the token pictures it writes for creatures you asked
 it to create or to place — one directory, described above, never read back and never sent
 anywhere.
-Your journals are read only far enough to find the handout entries this
+Your journals are read only far enough to find the handout and pin entries this
 module wrote before, by a flag it stamped on them — their contents are never sent anywhere.
+Your scenes are read the same way and for the same reason: to find the one this module made
+for a given map, so that sending it again refreshes that scene rather than making a second.
 A portrait travels as a **link back to your own Foundry** — its address and route prefix in
 front of the path Foundry stores — rather than as a picture. The file stays on your machine
 and only the browser you are picking monsters in ever asks for it, which is also why a

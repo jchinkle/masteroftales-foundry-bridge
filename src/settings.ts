@@ -50,6 +50,26 @@ export function handoutPath(nodeId: string): string {
 }
 
 /**
+ * One map's background picture, by MoT map id, the bytes behind a
+ * `scene.upsert`.
+ *
+ * The second endpoint this module *reads* from, and the reason it is a fetch
+ * rather than a URL on the command is **CORS** rather than size. `image.show`
+ * puts a signed Master of Tales URL on the wire and this module renders an
+ * `<img src>`, which is a no-CORS fetch: the browser loads it and paints it. A
+ * scene background cannot be painted, it has to be *copied* into this world's
+ * data directory, so that the map still opens the evening Master of Tales is
+ * down, and copying means `fetch()`, which is reading, which the asset host
+ * does not answer from a foreign origin. The bridge namespace does.
+ *
+ * `encodeURIComponent` on top of `safeId`'s own refusal of slashes and
+ * whitespace, belt and braces, and cheap.
+ */
+export function sceneBackgroundPath(mapId: string): string {
+  return `/api/v1/bridge/maps/${encodeURIComponent(mapId)}/background`;
+}
+
+/**
  * This world's actor catalog. The one endpoint the module **pushes a list** to
  * rather than a record — see protocol/actors.ts for why it is a POST out instead
  * of a GET in (nothing ever connects *into* a customer's Foundry), and why it is
